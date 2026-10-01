@@ -4,6 +4,8 @@ grid cell width: 50 height: 50 neighbors: 8 {
     bool is_obstacle <- false;
     bool burning <- false;
     float fire_power <- 0.0;
+    bool smoky <- false;
+    float smoke_density <- 0.0;
     rgb color <- #white;
 }
 
@@ -17,8 +19,12 @@ global {
 
     point fire_start_location <- {25, 37};
 
-    float fire_spread_probability <- 0.08;
+    // Fire spreads slower than smoke
+    float fire_spread_probability <- 0.03;
+    float smoke_spread_probability <- 0.08;
+    float smoke_decay <- 0.02;
     float fire_damage <- 8.0;
+    float smoke_damage <- 1.5;
 
     cell exit_cell;
     graph grid_graph;
@@ -145,6 +151,8 @@ global {
         if (fire_origin != nil and !fire_origin.is_obstacle) {
             fire_origin.burning <- true;
             fire_origin.fire_power <- 1.0;
+            fire_origin.smoky <- true;
+            fire_origin.smoke_density <- 1.0;
             fire_origin.color <- #red;
         }
 
@@ -162,11 +170,30 @@ global {
         }
     }
 
-    // Lửa lan
+    // Khói lan nhanh hơn lửa
+    reflex spread_smoke {
+	    ask cell where (each.smoky) {
+	
+	        smoke_density <- max([smoke_density - smoke_decay, 0.0]);
+	
+	        ask neighbors where (!each.is_obstacle) {
+	            if (rnd(1.0) < smoke_spread_probability) {
+	                smoky <- true;
+	                smoke_density <- max([smoke_density, 0.35]);
+	
+	                if (!self.burning) {
+	                    self.color <- #gray;
+	                }
+	            }
+	        }
+	    }
+	}
+
+    // Lửa lan chậm hơn khói
     reflex spread_fire {
         ask cell where (each.burning) {
 
-            fire_power <- min([fire_power + 0.05, 1.0]);
+            fire_power <- min([fire_power + 0.03, 1.0]);
 
             ask neighbors where (
                 !each.is_obstacle and
@@ -175,6 +202,8 @@ global {
                 if (rnd(1.0) < fire_spread_probability) {
                     burning <- true;
                     fire_power <- 1.0;
+                    smoky <- true;
+                    smoke_density <- 1.0;
                     color <- #red;
                 }
             }
@@ -258,20 +287,27 @@ species people skills: [moving] {
 
         // Damage từ lửa
         if (current_cell != nil) {
-
-            if (current_cell.burning) {
-                health <- health -
-                    fire_damage * current_cell.fire_power;
-            }
-
-            list nearby_fire <- current_cell.neighbors where (
-                each.burning
-            );
-
-            if (length(nearby_fire) > 0) {
-                health <- health - 2.0;
-            }
-        }
+		
+		    // Lửa gây damage mạnh
+		    if (current_cell.burning) {
+		        health <- health -
+		            fire_damage * current_cell.fire_power;
+		    }
+		
+		    // Khói gây damage nhẹ hơn
+		    if (current_cell.smoky) {
+		        health <- health - smoke_damage;
+		    }
+		
+		    // Đứng gần lửa
+		    list nearby_fire <- current_cell.neighbors where (
+		        each.burning
+		    );
+		
+		    if (length(nearby_fire) > 0) {
+		        health <- health - 2.0;
+		    }
+		}
 
         // Agent chết
         if (health <= 0) {
