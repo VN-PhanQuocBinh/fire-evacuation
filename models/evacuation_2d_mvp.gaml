@@ -4,18 +4,14 @@ model Evacuation2DMVPGrid
 // 1. ĐỊNH NGHĨA KHÔNG GIAN LƯỚI (GRID CELL)
 // ============================================================================
 grid cell width: 50 height: 50 neighbors: 8 {
-    // Thuộc tính địa hình
     bool is_obstacle <- false;
     
-    // Thuộc tính Lửa (Fire attributes)
     bool burning <- false;
     float fire_power <- 0.0;
     
-    // Thuộc tính Khói (Smoke attributes)
     bool smoky <- false;
     float smoke_density <- 0.0;
     
-    // Màu sắc hiển thị ô
     rgb color <- #white;
 }
 
@@ -26,27 +22,23 @@ global {
     float step <- 0.1 #s;
     geometry shape <- square(50 #m);
 
-    // Chỉ số thống kê
     int initial_people_count <- 200;
     int evacuated_count <- 0;
     int casualties_count <- 0;
 
-    // Vị trí phát hỏa ban đầu (Pantry)
-    point fire_start_location <- {25, 37};
-
     // --- CẤU HÌNH GIAI ĐOẠN 1: HƯỚNG GIÓ & ĐỘNG LỰC HỌC KHÓI ---
-    // Vector Hướng gió: {dx, dy}
-    // Ví dụ: {0.3, -1.0} = gió thổi từ Nam lên Bắc và hơi lệch Đông
-    point wind_direction <- {-1.0, -1.0};
+    point wind_direction <- {0.3, -1.0};
     
-    // Hệ số môi trường
     float fire_spread_probability <- 0.03;
-    float smoke_spread_probability <- 0.12;   // Xác suất cơ sở
-    float smoke_decay <- 0.01;                // Suy giảm nồng độ tự nhiên
+    float smoke_spread_probability <- 0.12;
+    float smoke_decay <- 0.01;
     float fire_damage <- 8.0;
     float smoke_damage <- 1.5;
 
-    // Biến đối tượng không gian
+    // Biến điều khiển tương tác
+    bool fire_started <- false;          // Đã đặt lửa chưa?
+    point fire_start_location <- nil;    // Vị trí lửa (do người dùng click)
+
     cell exit_cell;
     graph grid_graph;
 
@@ -54,13 +46,11 @@ global {
         // --------------------------------------------------------------------
         // A. TẠO CÁC VẬT THỂ MÔI TRƯỜNG & ĐỊA HÌNH
         // --------------------------------------------------------------------
-        // 1. Lối thoát hiểm
         create exit_door {
             location <- {25, 1};
             shape <- box(4 #m, 1 #m, 1 #m);
         }
 
-        // 2. Tường bao quanh phòng
         create obstacle {
             shape <- line([{0,0}, {23,0}]) +
                      line([{27,0}, {50,0}]) +
@@ -105,42 +95,68 @@ global {
             }
         }
 
-        // Xác định ô exit chính xác
         exit_cell <- cell({25, 1});
         exit_cell.is_obstacle <- false;
         exit_cell.color <- #white;
 
-        // Xây dựng Đồ thị Lưới (Distance Graph) - cú pháp chuẩn 2025
         list<cell> open_cells <- cell where (!each.is_obstacle);
         grid_graph <- as_distance_graph(open_cells, 1.5);
 
-        // Khởi tạo ngọn lửa xuất phát
-        cell fire_origin <- cell(fire_start_location);
-        if (fire_origin != nil and !fire_origin.is_obstacle) {
-            ask fire_origin {
-                burning <- true;
-                fire_power <- 1.0;
-                smoky <- true;
-                smoke_density <- 1.0;
-                color <- #red;
-            }
-        }
+        // KHÔNG khởi tạo lửa ở đây nữa – chờ người dùng click
 
         // Khởi tạo Nhân viên
-        list<cell> free_cells <- cell where (!each.is_obstacle and !each.burning);
+        list<cell> free_cells <- cell where (!each.is_obstacle);
         create people number: initial_people_count {
             cell start_cell <- one_of(free_cells);
             location <- start_cell.location;
             speed <- 1.2 #m/#s + rnd(-0.2, 0.3);
             health <- 100.0;
         }
+        
+        write ">>> Click chuột TRÁI vào một ô trống để bắt đầu đám cháy!";
     }
 
     // --------------------------------------------------------------------
-    // C. REFLEX QUẢN LÝ KHÓI – ANISOTROPIC + CONCENTRATION DECAY (Giai đoạn 1)
+    // ACTION TƯƠNG TÁC: Click để đặt điểm cháy
     // --------------------------------------------------------------------
-    reflex spread_smoke {
-        // Chuẩn hóa vector gió (norm() trả về float → phải chia)
+    action start_fire_at_click { 
+	    if (fire_started) {
+	        write "Đám cháy đã được khởi tạo rồi. Không thể đặt thêm.";
+	        return;
+	    }
+	    
+	    point click_loc <- #user_location;
+	    cell target_cell <- cell closest_to click_loc;   // an toàn hơn cell(click_loc)
+	    
+	    if (target_cell = nil) {
+	        write "Click ngoài lưới!";
+	        return;
+	    }
+	    
+	    if (target_cell.is_obstacle) {
+	        write "Không thể đặt lửa trên vật cản / tường!";
+	        return;
+	    }
+	    
+	    // Đặt lửa thành công
+	    fire_started <- true;
+	    fire_start_location <- target_cell.location;
+	    
+	    ask target_cell {
+	        burning <- true;
+	        fire_power <- 1.0;
+	        smoky <- true;
+	        smoke_density <- 1.0;
+	        color <- #red;
+	    }
+	    
+	    write ">>> Đám cháy đã bắt đầu tại: " + fire_start_location;
+	}
+
+    // --------------------------------------------------------------------
+    // C. REFLEX QUẢN LÝ KHÓI – ANISOTROPIC + CONCENTRATION DECAY
+    // --------------------------------------------------------------------
+    reflex spread_smoke when: fire_started {
         float wind_magnitude <- norm(wind_direction);
         point normalized_wind <- (wind_magnitude = 0.0) ? {0,0} : (wind_direction / wind_magnitude);
 
@@ -148,7 +164,6 @@ global {
             point source_loc <- self.location;
             float source_density <- self.smoke_density;
 
-            // 1. Suy giảm nồng độ tự nhiên tại ô nguồn
             smoke_density <- max([smoke_density - smoke_decay, 0.0]);
             
             if (smoke_density <= 0.05 and !burning) {
@@ -156,43 +171,30 @@ global {
                 color <- #white;
             }
 
-            // 2. Lan truyền anisotropic theo hướng gió
             list<cell> target_neighbors <- self.neighbors where (!each.is_obstacle);
             
             loop nb over: target_neighbors {
-                // Vector hướng từ nguồn → hàng xóm
                 point dir_to_neighbor <- {nb.location.x - source_loc.x, nb.location.y - source_loc.y};
                 float dir_magnitude <- norm(dir_to_neighbor);
                 
                 if (dir_magnitude > 0.0) {
                     point normalized_dir <- dir_to_neighbor / dir_magnitude;
                     
-                    // Dot product: đo mức độ cùng hướng với gió (-1 → +1)
                     float alignment <- (normalized_wind = {0,0}) 
                         ? 0.0 
                         : (normalized_dir.x * normalized_wind.x + normalized_dir.y * normalized_wind.y);
                     
-                    // Xác suất động: downstream cao gấp ~3.5 lần upstream
-                    // alignment = 1  → 1 + 2.5 = 3.5
-                    // alignment = 0  → 1.0
-                    // alignment = -1 → 1 - 2.5 = -1.5 → clamp về 0.15
                     float dynamic_probability <- smoke_spread_probability * max([0.15, 1.0 + alignment * 2.5]);
                     
                     if (rnd(1.0) < dynamic_probability) {
                         nb.smoky <- true;
                         
-                        // Concentration Decay: truyền theo % nồng độ nguồn
-                        // Downstream nhận nhiều hơn (0.65 → 0.85)
                         float transfer_ratio <- 0.65 + (max([alignment, 0.0]) * 0.20);
                         float transferred_smoke <- source_density * transfer_ratio;
                         
-                        // Cập nhật nồng độ (lấy giá trị cao hơn)
                         nb.smoke_density <- max([nb.smoke_density, transferred_smoke]);
-                        
-                        // Giới hạn nồng độ tối đa
                         if (nb.smoke_density > 1.0) { nb.smoke_density <- 1.0; }
 
-                        // Cập nhật màu sắc
                         if (!nb.burning) {
                             int gray_val <- int(230 - (nb.smoke_density * 180));
                             nb.color <- rgb(gray_val, gray_val, gray_val);
@@ -206,7 +208,7 @@ global {
     // --------------------------------------------------------------------
     // D. REFLEX QUẢN LÝ LỬA LAN TRUYỀN
     // --------------------------------------------------------------------
-    reflex spread_fire {
+    reflex spread_fire when: fire_started {
         ask cell where (each.burning) {
             fire_power <- min([fire_power + 0.03, 1.0]);
 
@@ -249,7 +251,7 @@ species obstacle {
 species people skills: [moving] {
     float health;
 
-    reflex move_to_exit {
+    reflex move_to_exit when: fire_started {
         cell current_cell <- cell(location);
 
         if (current_cell != nil) {
@@ -265,7 +267,6 @@ species people skills: [moving] {
                         float actual_speed <- speed * (1.0 - (current_cell.smoke_density * 0.5));
                         do goto target: next_cell.location speed: max([actual_speed, 0.3 #m/#s]);
                     } else {
-                        // Tìm đường vòng an toàn
                         list<cell> safe_cells <- cell where (!each.is_obstacle and !each.burning);
                         path safe_path <- path_between(safe_cells, current_cell, exit_cell);
 
@@ -325,7 +326,7 @@ species people skills: [moving] {
 }
 
 // ============================================================================
-// 5. GIAO DIỆN MÔ PHỎNG
+// 5. GIAO DIỆN MÔ PHỎNG + TƯƠNG TÁC CHUỘT
 // ============================================================================
 experiment MainGUI type: gui {
     output {
@@ -334,6 +335,13 @@ experiment MainGUI type: gui {
             species obstacle aspect: default;
             species exit_door aspect: default;
             species people aspect: default;
+            
+            // --- TƯƠNG TÁC CLICK CHUỘT ---
+            event #mouse_down {
+                ask simulation {
+                    do start_fire_at_click;
+                }
+            }
         }
 
         display Evacuation_Chart type: 2d refresh: every(1#cycles) {
