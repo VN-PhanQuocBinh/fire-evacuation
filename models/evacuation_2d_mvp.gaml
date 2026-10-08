@@ -1,42 +1,66 @@
 model Evacuation2DMVPGrid
 
+// ============================================================================
+// 1. ĐỊNH NGHĨA KHÔNG GIAN LƯỚI (GRID CELL)
+// ============================================================================
 grid cell width: 50 height: 50 neighbors: 8 {
+    // Thuộc tính địa hình
     bool is_obstacle <- false;
+    
+    // Thuộc tính Lửa (Fire attributes)
     bool burning <- false;
     float fire_power <- 0.0;
+    
+    // Thuộc tính Khói (Smoke attributes)
     bool smoky <- false;
     float smoke_density <- 0.0;
+    
+    // Màu sắc hiển thị ô
     rgb color <- #white;
 }
 
+// ============================================================================
+// 2. MÔ TRƯỜNG MÔ PHỎNG (GLOBAL)
+// ============================================================================
 global {
     float step <- 0.1 #s;
     geometry shape <- square(50 #m);
 
+    // Chỉ số thống kê
     int initial_people_count <- 200;
     int evacuated_count <- 0;
     int casualties_count <- 0;
 
+    // Vị trí phát hỏa ban đầu (Pantry)
     point fire_start_location <- {25, 37};
 
-    // Fire spreads slower than smoke
+    // --- CẤU HÌNH GIAI ĐOẠN 1: HƯỚNG GIÓ & ĐỘNG LỰC HỌC KHÓI ---
+    // Vector Hướng gió: {dx, dy}
+    // Ví dụ: {0.3, -1.0} = gió thổi từ Nam lên Bắc và hơi lệch Đông
+    point wind_direction <- {-1.0, -1.0};
+    
+    // Hệ số môi trường
     float fire_spread_probability <- 0.03;
-    float smoke_spread_probability <- 0.08;
-    float smoke_decay <- 0.02;
+    float smoke_spread_probability <- 0.12;   // Xác suất cơ sở
+    float smoke_decay <- 0.01;                // Suy giảm nồng độ tự nhiên
     float fire_damage <- 8.0;
     float smoke_damage <- 1.5;
 
+    // Biến đối tượng không gian
     cell exit_cell;
     graph grid_graph;
 
     init {
-        // 1. Tạo lối thoát hiểm
+        // --------------------------------------------------------------------
+        // A. TẠO CÁC VẬT THỂ MÔI TRƯỜNG & ĐỊA HÌNH
+        // --------------------------------------------------------------------
+        // 1. Lối thoát hiểm
         create exit_door {
             location <- {25, 1};
             shape <- box(4 #m, 1 #m, 1 #m);
         }
 
-        // 2. Tạo tường bao quanh
+        // 2. Tường bao quanh phòng
         create obstacle {
             shape <- line([{0,0}, {23,0}]) +
                      line([{27,0}, {50,0}]) +
@@ -46,87 +70,34 @@ global {
             shape <- shape + 2.0;
         }
 
-        // A. Khu Lễ tân
-        create obstacle {
-            location <- {25, 10};
-            shape <- box(10 #m, 2 #m, 1 #m);
-        }
+        // Quầy Lễ tân
+        create obstacle { location <- {25, 10}; shape <- box(10 #m, 2 #m, 1 #m); }
 
-        // B. Phòng Giám đốc / Server
-        create obstacle {
-            location <- {6, 16};
-            shape <- box(12 #m, 1 #m, 1 #m);
-        }
+        // Phòng Giám đốc / Server
+        create obstacle { location <- {6, 16}; shape <- box(12 #m, 1 #m, 1 #m); }
+        create obstacle { location <- {16, 8}; shape <- box(1 #m, 16 #m, 1 #m); }
 
-        create obstacle {
-            location <- {16, 8};
-            shape <- box(1 #m, 16 #m, 1 #m);
-        }
+        // Phòng họp lớn
+        create obstacle { location <- {34, 6}; shape <- box(1 #m, 20 #m, 1 #m); }
+        create obstacle { location <- {43, 16}; shape <- box(10 #m, 1 #m, 1 #m); }
+        create obstacle { location <- {42, 8}; shape <- box(6 #m, 3 #m, 1 #m); }
 
-        // C. Phòng họp lớn
-        create obstacle {
-            location <- {34, 6};
-            shape <- box(1 #m, 20 #m, 1 #m);
-        }
+        // Cụm Bàn làm việc
+        create obstacle { location <- {10, 24}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {10, 30}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {40, 24}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {40, 30}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {10, 38}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {10, 44}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {40, 38}; shape <- box(12 #m, 3 #m, 1 #m); }
+        create obstacle { location <- {40, 44}; shape <- box(12 #m, 3 #m, 1 #m); }
 
-        create obstacle {
-            location <- {43, 16};
-            shape <- box(10 #m, 1 #m, 1 #m);
-        }
+        // Khu Pantry
+        create obstacle { location <- {25, 42}; shape <- square(6 #m); }
 
-        create obstacle {
-            location <- {42, 8};
-            shape <- box(6 #m, 3 #m, 1 #m);
-        }
-
-        // D. Khu vực làm việc mở
-        create obstacle {
-            location <- {10, 24};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {10, 30};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {40, 24};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {40, 30};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {10, 38};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {10, 44};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {40, 38};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        create obstacle {
-            location <- {40, 44};
-            shape <- box(12 #m, 3 #m, 1 #m);
-        }
-
-        // E. Khu vực Pantry
-        create obstacle {
-            location <- {25, 42};
-            shape <- square(6 #m);
-        }
-
-        // Đánh dấu các ô bị vật cản
+        // --------------------------------------------------------------------
+        // B. CẬP NHẬT TRẠNG THÁI LƯỚI & TẠO ĐỒ THỊ DI CHUYỂN
+        // --------------------------------------------------------------------
         ask cell {
             if (self overlaps union(obstacle collect each.shape)) {
                 is_obstacle <- true;
@@ -134,34 +105,29 @@ global {
             }
         }
 
-        // Xác định ô exit
+        // Xác định ô exit chính xác
         exit_cell <- cell({25, 1});
-
-        // Exit phải luôn là ô có thể đi vào
         exit_cell.is_obstacle <- false;
         exit_cell.color <- #white;
 
-        // Tạo graph sau khi xác định exit
-        list open_cells <- cell where (!each.is_obstacle);
+        // Xây dựng Đồ thị Lưới (Distance Graph) - cú pháp chuẩn 2025
+        list<cell> open_cells <- cell where (!each.is_obstacle);
         grid_graph <- as_distance_graph(open_cells, 1.5);
 
-        // Khởi tạo điểm cháy
+        // Khởi tạo ngọn lửa xuất phát
         cell fire_origin <- cell(fire_start_location);
-
         if (fire_origin != nil and !fire_origin.is_obstacle) {
-            fire_origin.burning <- true;
-            fire_origin.fire_power <- 1.0;
-            fire_origin.smoky <- true;
-            fire_origin.smoke_density <- 1.0;
-            fire_origin.color <- #red;
+            ask fire_origin {
+                burning <- true;
+                fire_power <- 1.0;
+                smoky <- true;
+                smoke_density <- 1.0;
+                color <- #red;
+            }
         }
 
-        // Khởi tạo người
-        list free_cells <- cell where (
-            !each.is_obstacle and
-            !each.burning
-        );
-
+        // Khởi tạo Nhân viên
+        list<cell> free_cells <- cell where (!each.is_obstacle and !each.burning);
         create people number: initial_people_count {
             cell start_cell <- one_of(free_cells);
             location <- start_cell.location;
@@ -170,41 +136,87 @@ global {
         }
     }
 
-    // Khói lan nhanh hơn lửa
+    // --------------------------------------------------------------------
+    // C. REFLEX QUẢN LÝ KHÓI – ANISOTROPIC + CONCENTRATION DECAY (Giai đoạn 1)
+    // --------------------------------------------------------------------
     reflex spread_smoke {
-	    ask cell where (each.smoky) {
-	
-	        smoke_density <- max([smoke_density - smoke_decay, 0.0]);
-	
-	        ask neighbors where (!each.is_obstacle) {
-	            if (rnd(1.0) < smoke_spread_probability) {
-	                smoky <- true;
-	                smoke_density <- max([smoke_density, 0.35]);
-	
-	                if (!self.burning) {
-	                    self.color <- #gray;
-	                }
-	            }
-	        }
-	    }
-	}
+        // Chuẩn hóa vector gió (norm() trả về float → phải chia)
+        float wind_magnitude <- norm(wind_direction);
+        point normalized_wind <- (wind_magnitude = 0.0) ? {0,0} : (wind_direction / wind_magnitude);
 
-    // Lửa lan chậm hơn khói
+        ask cell where (each.smoky) {
+            point source_loc <- self.location;
+            float source_density <- self.smoke_density;
+
+            // 1. Suy giảm nồng độ tự nhiên tại ô nguồn
+            smoke_density <- max([smoke_density - smoke_decay, 0.0]);
+            
+            if (smoke_density <= 0.05 and !burning) {
+                smoky <- false;
+                color <- #white;
+            }
+
+            // 2. Lan truyền anisotropic theo hướng gió
+            list<cell> target_neighbors <- self.neighbors where (!each.is_obstacle);
+            
+            loop nb over: target_neighbors {
+                // Vector hướng từ nguồn → hàng xóm
+                point dir_to_neighbor <- {nb.location.x - source_loc.x, nb.location.y - source_loc.y};
+                float dir_magnitude <- norm(dir_to_neighbor);
+                
+                if (dir_magnitude > 0.0) {
+                    point normalized_dir <- dir_to_neighbor / dir_magnitude;
+                    
+                    // Dot product: đo mức độ cùng hướng với gió (-1 → +1)
+                    float alignment <- (normalized_wind = {0,0}) 
+                        ? 0.0 
+                        : (normalized_dir.x * normalized_wind.x + normalized_dir.y * normalized_wind.y);
+                    
+                    // Xác suất động: downstream cao gấp ~3.5 lần upstream
+                    // alignment = 1  → 1 + 2.5 = 3.5
+                    // alignment = 0  → 1.0
+                    // alignment = -1 → 1 - 2.5 = -1.5 → clamp về 0.15
+                    float dynamic_probability <- smoke_spread_probability * max([0.15, 1.0 + alignment * 2.5]);
+                    
+                    if (rnd(1.0) < dynamic_probability) {
+                        nb.smoky <- true;
+                        
+                        // Concentration Decay: truyền theo % nồng độ nguồn
+                        // Downstream nhận nhiều hơn (0.65 → 0.85)
+                        float transfer_ratio <- 0.65 + (max([alignment, 0.0]) * 0.20);
+                        float transferred_smoke <- source_density * transfer_ratio;
+                        
+                        // Cập nhật nồng độ (lấy giá trị cao hơn)
+                        nb.smoke_density <- max([nb.smoke_density, transferred_smoke]);
+                        
+                        // Giới hạn nồng độ tối đa
+                        if (nb.smoke_density > 1.0) { nb.smoke_density <- 1.0; }
+
+                        // Cập nhật màu sắc
+                        if (!nb.burning) {
+                            int gray_val <- int(230 - (nb.smoke_density * 180));
+                            nb.color <- rgb(gray_val, gray_val, gray_val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // D. REFLEX QUẢN LÝ LỬA LAN TRUYỀN
+    // --------------------------------------------------------------------
     reflex spread_fire {
         ask cell where (each.burning) {
-
             fire_power <- min([fire_power + 0.03, 1.0]);
 
-            ask neighbors where (
-                !each.is_obstacle and
-                !each.burning
-            ) {
+            ask neighbors where (!each.is_obstacle and !each.burning) {
                 if (rnd(1.0) < fire_spread_probability) {
-                    burning <- true;
-                    fire_power <- 1.0;
-                    smoky <- true;
-                    smoke_density <- 1.0;
-                    color <- #red;
+                    self.burning <- true;
+                    self.fire_power <- 1.0;
+                    self.smoky <- true;
+                    self.smoke_density <- 1.0;
+                    self.color <- #red;
                 }
             }
         }
@@ -216,6 +228,9 @@ global {
     }
 }
 
+// ============================================================================
+// 3. ĐỊNH NGHĨA CÁC VẬT THỂ MÔI TRƯỜNG
+// ============================================================================
 species exit_door {
     aspect default {
         draw shape color: #green;
@@ -228,6 +243,9 @@ species obstacle {
     }
 }
 
+// ============================================================================
+// 4. HÀNH VI CON NGƯỜI
+// ============================================================================
 species people skills: [moving] {
     float health;
 
@@ -235,49 +253,28 @@ species people skills: [moving] {
         cell current_cell <- cell(location);
 
         if (current_cell != nil) {
-
-            // Tìm đường ngắn nhất trên graph
-            path evacuation_path <- path_between(
-                grid_graph,
-                current_cell,
-                exit_cell
-            );
+            path evacuation_path <- path_between(grid_graph, current_cell, exit_cell);
 
             if (evacuation_path != nil) {
-
-                list path_vertices <- evacuation_path.vertices;
+                list<cell> path_vertices <- evacuation_path.vertices;
 
                 if (length(path_vertices) > 1) {
-
-                    // Vertex tiếp theo trên đường đi
                     cell next_cell <- path_vertices[1];
 
-                    // Tránh ô đang cháy
                     if (!next_cell.burning) {
-                        do goto target: next_cell.location speed: speed;
+                        float actual_speed <- speed * (1.0 - (current_cell.smoke_density * 0.5));
+                        do goto target: next_cell.location speed: max([actual_speed, 0.3 #m/#s]);
                     } else {
-
-                        // Nếu next cell đã cháy, tìm lại path
-                        list safe_cells <- cell where (
-                            !each.is_obstacle and
-                            !each.burning
-                        );
-
-                        path safe_path <- path_between(
-                            safe_cells,
-                            current_cell,
-                            exit_cell
-                        );
+                        // Tìm đường vòng an toàn
+                        list<cell> safe_cells <- cell where (!each.is_obstacle and !each.burning);
+                        path safe_path <- path_between(safe_cells, current_cell, exit_cell);
 
                         if (safe_path != nil) {
-                            list safe_vertices <- safe_path.vertices;
-
+                            list<cell> safe_vertices <- safe_path.vertices;
                             if (length(safe_vertices) > 1) {
                                 cell safe_next <- safe_vertices[1];
-
-                                do goto
-                                    target: safe_next.location
-                                    speed: speed;
+                                float actual_speed <- speed * (1.0 - (current_cell.smoke_density * 0.5));
+                                do goto target: safe_next.location speed: max([actual_speed, 0.3 #m/#s]);
                             }
                         }
                     }
@@ -285,38 +282,26 @@ species people skills: [moving] {
             }
         }
 
-        // Damage từ lửa
+        // Cơ chế sát thương
         if (current_cell != nil) {
-		
-		    // Lửa gây damage mạnh
-		    if (current_cell.burning) {
-		        health <- health -
-		            fire_damage * current_cell.fire_power;
-		    }
-		
-		    // Khói gây damage nhẹ hơn
-		    if (current_cell.smoky) {
-		        health <- health - smoke_damage;
-		    }
-		
-		    // Đứng gần lửa
-		    list nearby_fire <- current_cell.neighbors where (
-		        each.burning
-		    );
-		
-		    if (length(nearby_fire) > 0) {
-		        health <- health - 2.0;
-		    }
-		}
+            if (current_cell.burning) {
+                health <- health - (fire_damage * current_cell.fire_power);
+            }
+            if (current_cell.smoky) {
+                health <- health - (smoke_damage * current_cell.smoke_density);
+            }
+            list<cell> nearby_fire <- current_cell.neighbors where (each.burning);
+            if (!empty(nearby_fire)) {
+                health <- health - (2.0 * length(nearby_fire));
+            }
+        }
 
-        // Agent chết
         if (health <= 0) {
             casualties_count <- casualties_count + 1;
             do die;
         }
     }
 
-    // Đã tới cửa
     reflex check_evacuated {
         if (self distance_to {25, 1} < 2.5 #m) {
             evacuated_count <- evacuated_count + 1;
@@ -326,7 +311,6 @@ species people skills: [moving] {
 
     aspect default {
         rgb current_color;
-
         if (health > 75) {
             current_color <- #yellow;
         } else if (health > 50) {
@@ -336,13 +320,13 @@ species people skills: [moving] {
         } else {
             current_color <- #darkred;
         }
-
-        draw circle(0.5 #m)
-            color: current_color
-            border: #black;
+        draw circle(0.5 #m) color: current_color border: #black;
     }
 }
 
+// ============================================================================
+// 5. GIAO DIỆN MÔ PHỎNG
+// ============================================================================
 experiment MainGUI type: gui {
     output {
         display Main_Display type: 2d {
@@ -353,18 +337,10 @@ experiment MainGUI type: gui {
         }
 
         display Evacuation_Chart type: 2d refresh: every(1#cycles) {
-            chart "Số người còn kẹt trong phòng" type: series {
-                data "Người chưa thoát"
-                    value: length(people)
-                    color: #red;
-
-                data "Đã thoát hiểm"
-                    value: evacuated_count
-                    color: #green;
-
-                data "Thương vong"
-                    value: casualties_count
-                    color: #red;
+            chart "Báo cáo Tình trạng Sơ tán & Thương vong" type: series {
+                data "Người chưa thoát" value: length(people) color: #blue;
+                data "Đã thoát hiểm" value: evacuated_count color: #green;
+                data "Thương vong (Lửa/Khói)" value: casualties_count color: #red;
             }
         }
     }
