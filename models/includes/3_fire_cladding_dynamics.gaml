@@ -18,13 +18,13 @@ global {
     // =========================================================================
     // THAM SỐ LỬA & KHÓI
     // =========================================================================
-    float step <- 0.2 #s;
+    float step <- 0.1 #s;
 
     // Hướng gió: vector (x, y). Âm y = hướng lên phía Bắc (lên màn hình)
     point wind_direction <- {0.2, -1.0};
 
     float fire_spread_probability  <- 0.025;  // Xác suất lan lửa mỗi bước
-    float smoke_spread_probability <- 0.10;   // Xác suất lan khói mỗi bước
+    float smoke_spread_probability <- 0.15;   // Xác suất lan khói mỗi bước
     float smoke_decay              <- 0.008;  // Suy giảm mật độ khói mỗi bước
     float fire_growth_rate         <- 0.02;   // Tốc độ tăng cường độ lửa
 

@@ -19,7 +19,10 @@ model grid_rasterizer
 import "1_building_architecture.gaml"
 
 // Lưới ô ma trận
-grid grid_cell width: 200 height: 150 neighbors: 8 {
+// 100 x 75
+// 200 x 150
+// 300 x 225
+grid grid_cell width: 300 height: 225 neighbors: 8 {
     // --- CỜ KIẾN TRÚC (ánh xạ từ plan_element.etype) ---
     bool is_origin    <- false;   // Điểm phát cháy ban đầu
     bool is_window    <- false;   // Cửa sổ (lan cháy ra ngoài mặt dựng)
