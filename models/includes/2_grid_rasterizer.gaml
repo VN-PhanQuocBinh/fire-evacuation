@@ -65,8 +65,15 @@ global {
             color         <- #transparent;
         }
 
-        // Tối ưu: Chỉ quét các ô grid nằm trong vùng mặt bằng bên phải (x: 48 -> 94, y: 15 -> 61)
-        list<grid_cell> floor_cells <- grid_cell where (each.location.x >= 48.0 and each.location.x <= 94.0 and each.location.y >= 15.0 and each.location.y <= 61.0);
+        // Khóa chặt các ô ngoài không gian tòa nhà thành vật cản để lửa và khói KHÔNG BAO GIỜ lan ra ngoài không trung
+        ask grid_cell {
+            if (location.x < 48.8 or location.x > 93.2 or location.y < 15.8 or location.y > 60.2) {
+                is_obstacle <- true;
+            }
+        }
+
+        // Tối ưu: Chỉ quét các ô grid nằm trong phạm vi mặt bằng tòa nhà (x: 49 -> 93, y: 16 -> 60)
+        list<grid_cell> floor_cells <- grid_cell where (each.location.x >= 48.8 and each.location.x <= 93.2 and each.location.y >= 15.8 and each.location.y <= 60.2);
 
         // Ánh xạ từng plan_element sang các ô grid tương ứng
         ask plan_element {

@@ -4,9 +4,9 @@
  * Description: FILE ĐIỀU KHIỂN CHÍNH — Grenfell Tower Modular Simulation
  *
  *   Kiến trúc module:
- *     1_building_architecture.gaml  → Mặt đứng & Mặt bằng 2D
+ *     1_building_architecture.gaml  → Mặt đứng 25 tầng & Mặt bằng 2D
  *     2_grid_rasterizer.gaml        → Lớp lưới Grid Cell + ánh xạ cờ kiến trúc
- *     3_fire_cladding_dynamics.gaml → Động lực học Lửa & Khói
+ *     3_fire_cladding_dynamics.gaml → Lửa & Khói (Dual-Layer & Sequence-based Spread)
  *     4_people_evacuation.gaml      → Con người & Sơ tán (placeholder)
  *
  *   Tương thích: GAMA 2025.6.4
@@ -21,7 +21,7 @@ global {
     geometry shape <- rectangle(100.0, 75.0) at_location {50.0, 37.5};
 
     init {
-        write "=== KHỞI TẠO MÔ HÌNH GRENFELL TOWER (MODULAR) ===";
+        write "=== KHỞI TẠO MÔ HÌNH GRENFELL TOWER (MODULAR DUAL-LAYER) ===";
 
         // 1. Dựng bản vẽ kiến trúc (mặt đứng bên trái + mặt bằng bên phải)
         do build_tower_elevation;
@@ -35,40 +35,41 @@ global {
 
         // 4. Trang trí giao diện (tiêu đề, phân cách, nhãn)
         create screen_decor with: [dtype: "header",
-            label: "GRENFELL TOWER ARCHITECTURAL MODEL (PART 2 & PART 3 - WILEY/EFFECTIS)",
+            label: "GRENFELL TOWER FIRE & CLADDING SIMULATION (DUAL-LAYER 25 FLOORS)",
             location: {50.0, 3.2}];
         create screen_decor with: [dtype: "separator",
             shape: polyline([{46.0, 5.0}, {46.0, 72.0}])];
         create screen_decor with: [dtype: "title_left",
             label: "MẶT ĐỨNG SỐ HỌC (CLICK CHỌN TẦNG KHẢO SÁT)",
             location: {22.5, 6.5}];
-        create screen_decor with: [dtype: "fig2_label", label: "North and South", location: {11.0, 65.8}];
-        create screen_decor with: [dtype: "fig2_label", label: "elevations",       location: {12.2, 67.5}];
-        create screen_decor with: [dtype: "fig2_label", label: "East and West",    location: {28.5, 65.8}];
-        create screen_decor with: [dtype: "fig2_label", label: "elevations",       location: {29.8, 67.5}];
+        create screen_decor with: [dtype: "fig2_label", label: "North & South",   location: {13.5, 65.8}];
+        create screen_decor with: [dtype: "fig2_label", label: "elevations",       location: {13.5, 67.5}];
+        create screen_decor with: [dtype: "fig2_label", label: "East & West",     location: {31.5, 65.8}];
+        create screen_decor with: [dtype: "fig2_label", label: "elevations",       location: {31.5, 67.5}];
         create screen_decor with: [dtype: "fig2_caption",
-            label: "FIGURE 2   Numerical models of the south/north and east/west faces of the Tower",
+            label: "FIGURE 2   Numerical models of Cladding fire progression across 25 storeys",
             location: {6.5, 70.8}];
             
-        write "=== KHỞI TẠO HOÀN TẤT: SẴN SÀNG HIỂN THỊ ===";
+        write "=== KHỞI TẠO HOÀN TẤT: SẴN SÀNG MÔ PHỎNG ===";
     }
 
     // =========================================================================
     // XỬ LÝ CLICK CHUỘT
-    //   Click vào mặt đứng bên trái (x: 4–44) → chọn tầng
-    //   Click vào mặt bằng bên phải (x: 49–93) → đặt điểm cháy
+    //   Click vào mặt đứng bên trái (x: 4–44) → chọn tầng & đồng bộ trạng thái lửa
+    //   Click vào mặt bằng bên phải (x: 49–93) → kích hoạt chuỗi phát hỏa (Sequence)
     // =========================================================================
     action handle_click {
         point pt <- #user_location;
 
         if (pt.x >= 4.0 and pt.x <= 44.0) {
             do select_floor;
-            // Sau khi chuyển tầng, rasterize lại các cờ trên grid
+            // Tái tạo mặt bằng tầng mới và rasterize grid
             do rasterize_floor_plan;
+            // Đồng bộ trạng thái mồi lửa/khói của tầng vừa chọn
+            do sync_active_floor_fire;
         } else if (pt.x >= 49.0 and pt.x <= 93.0 and pt.y >= 16.0 and pt.y <= 60.0) {
-            if (!fire_started) {
-                do place_fire_at_click;
-            }
+            // Click chọn điểm phát hỏa chính xác theo tọa độ chuột
+            do place_fire_at_click;
         }
     }
 }
@@ -89,15 +90,14 @@ experiment Grenfell_Modular_Simulation type: gui {
             // 1. Khung trang trí tiêu đề & phân cách
             species screen_decor;
 
-            // 2. Nửa bên trái: Mặt đứng 25 tầng tháp (Figure 2)
+            // 2. Nửa bên trái: Mặt đứng 25 tầng tháp (Figure 2) - thể hiện Cladding 4 mặt E/N/S/W
             species floor_level_agt;
 
             // 3. Nửa bên phải: Mặt bằng kiến trúc 2D chi tiết
             species plan_element;
             species plan_label;
 
-            // 4. Lớp Lửa & Khói (Grid Cell): CHỈ vẽ các ô có lửa hoặc khói
-            // Không dùng câu lệnh `grid` thô để tránh phủ lưới kín màn hình
+            // 4. Lớp Lửa & Khói (Grid Cell): chỉ hiển thị ô có lửa hoặc khói
             species grid_cell aspect: default;
 
             // 5. Trang trí La bàn & Khung nét đứt Limit of the model
@@ -130,19 +130,39 @@ experiment Grenfell_Modular_Simulation type: gui {
                 }
             }
 
-            // 6. HUD trạng thái & Hướng dẫn sử dụng
+            // 6. HUD trạng thái & Tiến trình lan truyền
             graphics "HUD_Status" {
-                draw "TANG: " + selected_floor_name
-                    + " | LUA: " + (fire_started ? "DANG CHAY" : "Chua bat dau (Click mat bang de dat diem chay)")
-                    + " | O chay: " + length(grid_cell where each.burning)
-                    + " | O khoi: " + length(grid_cell where each.smoky)
-                    at: {49.0, 64.0} color: rgb(180,30,30) font: font("Arial",10,#bold);
+                floor_level_agt cur_fl <- first(floor_level_agt where (each.floor_id = selected_floor));
+                
+                string phase_str <- (fire_phase = 0) ? "CHƯA BẮT ĐẦU (Click chuột vào sàn để đặt điểm cháy)" :
+                    ((!cladding_ignited) ? "GIAI ĐOẠN 1: Lửa đang lan trong phòng (Chờ lan tới cửa sổ để bứt phá Cladding mặt ngoài...)" :
+                    ((!crown_reached) ? ("GIAI ĐOẠN 2: Lửa Cladding mặt Đông đang bốc lên TẦNG " + highest_east_floor + "/24") :
+                    ("GIAI ĐOẠN 3: Lan đỉnh Crown -> Chữ V ngược xuống mặt Bắc/Nam (Tầng " + v_lowest_floor + ") & mặt Tây")));
 
-                draw "BAN VE KIEN TRUC: 22m x 22m | LOI KY THUAT: 8m x 8m | Nen phong: MAU TRANG"
-                    at: {49.0, 67.0} color: rgb(20,35,75) font: font("Arial",9,#bold);
+                string clad_status <- (cur_fl = nil) ? "" :
+                    (" | Cladding Tầng " + selected_floor_name + ": "
+                    + "Đông: " + ((cur_fl.clad_east > 1.5) ? "Than đen" : ((cur_fl.clad_east > 0.1) ? "CHÁY RỰC" : "An toàn"))
+                    + " | Bắc: " + ((cur_fl.clad_north > 1.5) ? "Than đen" : ((cur_fl.clad_north > 0.1) ? "CHÁY RỰC" : "An toàn"))
+                    + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Than đen" : ((cur_fl.clad_south > 0.1) ? "CHÁY RỰC" : "An toàn"))
+                    + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Than đen" : ((cur_fl.clad_west > 0.1) ? "CHÁY RỰC" : "An toàn")));
 
-                draw "HUONG DAN: Click TRAI vao mat dung de chon tang | Click vao mat bang de dat diem chay"
-                    at: {49.0, 70.0} color: rgb(40,50,70) font: font("Arial",9,#plain);
+                bool stair_smoky <- (cur_fl != nil and cur_fl.interior_smoke_depth >= 18.0);
+
+                // Dòng 1: Tiến trình lan truyền Sequence
+                draw "TIẾN TRÌNH: " + phase_str
+                    at: {49.0, 63.8} color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",10,#bold);
+
+                // Dòng 2: Trạng thái tầng đang xem & Buồng thang bộ
+                draw "TẦNG " + selected_floor_name + clad_status
+                    at: {49.0, 66.5} color: rgb(20,35,75) font: font("Arial",9,#bold);
+
+                draw (stair_smoky ? "⚠️ THANG BỘ: NHIỄM KHÓI ĐỘC (NGUY HIỂM) | CỬA SỔ: " + ((cur_fl.window_broken) ? "VỠ / TÁP LỬA NỘI THẤT" : "BÌNH THƯỜNG") :
+                                   "✅ THANG BỘ: THÔNG THOÁNG / AN TOÀN (Khói chưa lan tới sảnh)")
+                    at: {49.0, 69.0} color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",9,#bold);
+
+                // Dòng 3: Hướng dẫn người dùng
+                draw "HƯỚNG DẪN: Click TRÁI vào cột Mặt đứng bên trái để chuyển tầng | Click chuột vào bất kỳ đâu trên mặt bằng để đặt mồi lửa"
+                    at: {49.0, 71.5} color: rgb(50,60,80) font: font("Arial",8,#plain);
             }
         }
     }

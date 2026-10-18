@@ -452,7 +452,29 @@ species floor_level_agt {
     float  y_bot;
     float  y_mid;
 
+    // --- CÁC BIẾN QUẢN LÝ CLADDING 4 MẶT & NỘI THẤT (DUAL-LAYER SIMULATION) ---
+    float clad_east  <- 0.0;   // 0.0: bình thường, 0.1-1.5: đang cháy (đỏ rực), >1.5: cháy kiệt (than đen)
+    float clad_north <- 0.0;
+    float clad_south <- 0.0;
+    float clad_west  <- 0.0;
+
+    bool  window_broken       <- false;   // Cửa sổ bị vỡ
+    bool  interior_fire       <- false;   // Cháy nội thất căn hộ
+    float floor_smoke_density <- 0.0;     // Mật độ khói (0.0 -> 1.0)
+    int   fire_start_tick     <- -1;      // Thời điểm tầng này bắt đầu bị cháy (tick)
+    float interior_burn_depth  <- 0.0;     // Độ sâu ngọn lửa đã lan vào trong từ cửa sổ (m)
+    float interior_smoke_depth <- 0.0;     // Độ sâu khói độc đã lan tỏa vào trong (m) - lan nhanh gấp 2.5 - 3 lần lửa
+
+    // Hàm chuyển đổi mức độ cháy Cladding sang màu trực quan
+    rgb get_cladding_color(float c_val) {
+        if (c_val <= 0.05) { return rgb(118,140,160); } // Bình thường (xanh xám kiến trúc)
+        if (c_val > 1.5)   { return rgb(42,42,48); }     // Cháy kiệt (than đen xám)
+        float r_ratio <- min([1.0, c_val / 1.2]);
+        return rgb(255, int(160 * (1.0 - r_ratio)), 0); // Đang cháy (Vàng cam -> Đỏ rực)
+    }
+
     aspect default {
+        // Highlight tầng đang chọn
         if (is_selected) {
             draw rectangle(35.0, y_bot - y_top + 0.3) at_location {22.5, y_mid}
                 color: rgb(255,245,175,140) border: #red;
@@ -468,63 +490,87 @@ species floor_level_agt {
                 color: rgb(180,40,40) font: font("Arial", 9, #bold);
         }
 
-        rgb clad_col <- rgb(118,140,160);
+        // =====================================================================
+        // CỘT TRÁI: NORTH & SOUTH ELEVATIONS (x: 6.0 -> 21.0)
+        //   Nửa trái (x: 6.0 -> 13.5): Mặt North
+        //   Nửa phải (x: 13.5 -> 21.0): Mặt South
+        // =====================================================================
+        rgb col_north <- get_cladding_color(clad_north);
+        rgb col_south <- get_cladding_color(clad_south);
 
-        // North/South elevation (trái)
-        draw rectangle(15.0, y_bot - y_top) at_location {13.5, y_mid}
-            color: clad_col border: rgb(85,102,118);
+        // Nửa trái: North
+        draw rectangle(7.5, y_bot - y_top) at_location {9.75, y_mid}
+            color: col_north border: rgb(85,102,118);
+        // Nửa phải: South
+        draw rectangle(7.5, y_bot - y_top) at_location {17.25, y_mid}
+            color: col_south border: rgb(85,102,118);
+
         draw line([{6.0, y_bot},{21.0, y_bot}]) color: rgb(65,80,95);
 
         if (floor_id >= 4 and floor_id <= 23) {
             float win_h <- (y_bot - y_top) * 0.62;
             float win_y <- y_mid;
-            draw line([{15.3, y_top},{15.3, y_bot}]) color: rgb(75,92,108);
-            list<float> ns_bays <- [7.4, 9.4, 11.4, 13.4, 16.6, 18.6];
+            draw line([{13.5, y_top},{13.5, y_bot}]) color: rgb(75,92,108);
+            list<float> ns_bays <- [7.4, 9.4, 11.4, 15.6, 17.6, 19.6];
             loop bx over: ns_bays {
+                // bx < 13.5 là mặt North (chỉ đỏ khi clad_north > 0.2)
+                // bx > 13.5 là mặt South (chỉ đỏ khi clad_south > 0.2)
+                bool is_bay_burning <- (bx < 13.5) ? (clad_north > 0.2) : (clad_south > 0.2);
+                rgb win_color <- is_bay_burning ? rgb(255,60,0) : rgb(215,230,244);
                 draw rectangle(1.6, win_h) at_location {bx, win_y} color: rgb(35,42,48);
-                draw rectangle(0.70, win_h - 0.2) at_location {bx - 0.38, win_y} color: rgb(245,248,252);
-                draw rectangle(0.70, win_h - 0.2) at_location {bx + 0.38, win_y} color: rgb(215,230,244);
+                draw rectangle(0.70, win_h - 0.2) at_location {bx - 0.38, win_y} color: win_color;
+                draw rectangle(0.70, win_h - 0.2) at_location {bx + 0.38, win_y} color: win_color;
                 draw line([{bx, win_y - win_h/2.0},{bx, win_y + win_h/2.0}]) color: rgb(35,42,48);
             }
         } else if (floor_id = 24) {
-            draw rectangle(15.0, y_bot - y_top) at_location {13.5, y_mid}
-                color: rgb(105,125,142) border: rgb(70,85,100);
-            list<float> c_lines <- [8.0,10.0,12.0,14.0,16.0,18.0,20.0];
+            // Crown Tầng 24
+            list<float> c_lines <- [8.0,10.0,12.0,15.0,17.0,19.0];
             loop lx over: c_lines { draw line([{lx, y_top},{lx, y_bot}]) color: rgb(70,85,100); }
-        } else {
-            draw rectangle(15.0, y_bot - y_top) at_location {13.5, y_mid}
-                color: rgb(210,215,222) border: rgb(120,130,140);
-            draw rectangle(13.6, (y_bot - y_top) * 0.7) at_location {13.5, y_mid}
-                color: rgb(180,205,225);
         }
 
-        // East/West elevation (phải)
-        draw rectangle(15.0, y_bot - y_top) at_location {31.5, y_mid}
-            color: clad_col border: rgb(85,102,118);
+        // =====================================================================
+        // CỘT PHẢI: EAST & WEST ELEVATIONS (x: 24.0 -> 39.0)
+        //   Nửa trái (x: 24.0 -> 31.5): Mặt West (chỉ cháy khi clad_west > 0.2)
+        //   Nửa phải (x: 31.5 -> 39.0): Mặt East (cháy đầu tiên khi clad_east > 0.2)
+        // =====================================================================
+        rgb col_west <- get_cladding_color(clad_west);
+        rgb col_east <- get_cladding_color(clad_east);
+
+        // Nửa trái: West
+        draw rectangle(7.5, y_bot - y_top) at_location {27.75, y_mid}
+            color: col_west border: rgb(85,102,118);
+        // Nửa phải: East
+        draw rectangle(7.5, y_bot - y_top) at_location {35.25, y_mid}
+            color: col_east border: rgb(85,102,118);
+
         draw line([{24.0, y_bot},{39.0, y_bot}]) color: rgb(65,80,95);
 
         if (floor_id >= 4 and floor_id <= 23) {
             float win_h <- (y_bot - y_top) * 0.62;
             float win_y <- y_mid;
-            list<float> ew_bays <- [25.4, 27.8, 30.2, 32.6, 35.0, 37.4];
+            draw line([{31.5, y_top},{31.5, y_bot}]) color: rgb(75,92,108);
+            list<float> ew_bays <- [25.4, 27.8, 30.2, 32.8, 35.2, 37.6];
             loop bx over: ew_bays {
+                // bx < 31.5 là mặt West (chỉ đỏ khi clad_west > 0.2)
+                // bx > 31.5 là mặt East (chỉ đỏ khi clad_east > 0.2)
+                bool bay_broken <- (bx > 31.5) ? (clad_east > 0.2) : (clad_west > 0.2);
+                rgb win_color <- bay_broken ? rgb(255,60,0) : rgb(215,230,245);
                 draw rectangle(1.8, win_h) at_location {bx, win_y} color: rgb(35,42,48);
-                draw rectangle(0.48, win_h - 0.2) at_location {bx - 0.55, win_y} color: rgb(245,248,252);
-                draw rectangle(0.48, win_h - 0.2) at_location {bx,        win_y} color: rgb(215,230,245);
-                draw rectangle(0.48, win_h - 0.2) at_location {bx + 0.55, win_y} color: rgb(240,246,252);
+                draw rectangle(0.48, win_h - 0.2) at_location {bx - 0.55, win_y} color: win_color;
+                draw rectangle(0.48, win_h - 0.2) at_location {bx,        win_y} color: win_color;
+                draw rectangle(0.48, win_h - 0.2) at_location {bx + 0.55, win_y} color: win_color;
                 draw line([{bx-0.28, win_y-win_h/2.0},{bx-0.28, win_y+win_h/2.0}]) color: rgb(35,42,48);
                 draw line([{bx+0.28, win_y-win_h/2.0},{bx+0.28, win_y+win_h/2.0}]) color: rgb(35,42,48);
             }
         } else if (floor_id = 24) {
-            draw rectangle(15.0, y_bot - y_top) at_location {31.5, y_mid}
-                color: rgb(105,125,142) border: rgb(70,85,100);
-            list<float> c_lines_ew <- [26.0,28.0,30.0,32.0,34.0,36.0,38.0];
+            // Crown Tầng 24
+            list<float> c_lines_ew <- [26.0,28.0,30.0,33.0,35.0,37.0];
             loop lx over: c_lines_ew { draw line([{lx, y_top},{lx, y_bot}]) color: rgb(70,85,100); }
-        } else {
-            draw rectangle(15.0, y_bot - y_top) at_location {31.5, y_mid}
-                color: rgb(210,215,222) border: rgb(120,130,140);
-            draw rectangle(13.6, (y_bot - y_top) * 0.7) at_location {31.5, y_mid}
-                color: rgb(180,205,225);
+        }
+
+        // Báo khói/lửa tầng nếu có cháy
+        if (clad_east > 0.1 or clad_north > 0.1 or clad_south > 0.1 or clad_west > 0.1) {
+            draw circle(0.25) at_location {4.8, y_mid} color: #red;
         }
     }
 }
