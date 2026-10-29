@@ -62,11 +62,15 @@ global {
         point pt <- #user_location;
 
         if (pt.x >= 4.0 and pt.x <= 44.0) {
+            // 1. Lưu snapshot trạng thái lửa/khói của tầng hiện tại
+            do save_current_floor_state;
+
+            // 2. Chuyển tầng và vẽ lại kiến trúc sàn
             do select_floor;
-            // Tái tạo mặt bằng tầng mới và rasterize grid
             do rasterize_floor_plan;
-            // Đồng bộ trạng thái mồi lửa/khói của tầng vừa chọn
-            do sync_active_floor_fire;
+
+            // 3. Phục hồi trạng thái lửa/khói riêng biệt của tầng mới chọn
+            do restore_active_floor_state;
         } else if (pt.x >= 49.0 and pt.x <= 93.0 and pt.y >= 16.0 and pt.y <= 60.0) {
             // Click chọn điểm phát hỏa chính xác theo tọa độ chuột
             do place_fire_at_click;

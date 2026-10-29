@@ -464,6 +464,12 @@ species floor_level_agt {
     int   fire_start_tick     <- -1;      // Thời điểm tầng này bắt đầu bị cháy (tick)
     float interior_burn_depth  <- 0.0;     // Độ sâu ngọn lửa đã lan vào trong từ cửa sổ (m)
     float interior_smoke_depth <- 0.0;     // Độ sâu khói độc đã lan tỏa vào trong (m) - lan nhanh gấp 2.5 - 3 lần lửa
+    // --- BỘ ĐỆM TẾ BÀO LỬA & KHÓI ĐỘC LẬP CHO TỪNG TẦNG (MULTI-FLOOR BUFFER) ---
+    list<int>          floor_burning_cells     <- []; // Danh sách index các ô đang cháy
+    map<int, float>    floor_fire_power        <- []; // Index -> mức độ lửa (0.0 - 1.0)
+    list<int>          floor_smoky_cells       <- []; // Danh sách index các ô có khói
+    map<int, float>    floor_smoke_density_map <- []; // Index -> nồng độ khói (0.0 - 1.0)
+    bool               floor_initialized_fire  <- false; // Đã gieo mầm cháy đầu tiên chưa
 
     // Hàm chuyển đổi mức độ cháy Cladding sang màu trực quan
     rgb get_cladding_color(float c_val) {

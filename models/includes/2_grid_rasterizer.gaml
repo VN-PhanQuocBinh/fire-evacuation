@@ -23,6 +23,7 @@ import "1_building_architecture.gaml"
 // 200 x 150
 // 300 x 225
 grid grid_cell width: 300 height: 225 neighbors: 8 {
+    int cell_id <- int(self);
     // --- CỜ KIẾN TRÚC (ánh xạ từ plan_element.etype) ---
     bool is_origin    <- false;   // Điểm phát cháy ban đầu
     bool is_window    <- false;   // Cửa sổ (lan cháy ra ngoài mặt dựng)
@@ -48,6 +49,9 @@ grid grid_cell width: 300 height: 225 neighbors: 8 {
 }
 
 global {
+    list<grid_cell> floor_interior_cells <- [];
+    list<grid_cell> floor_open_cells     <- [];
+
     // Hành động rasterize: ánh xạ plan_element → grid_cell flags
     // Gọi sau khi build_active_floor_plan() hoàn thành
     action rasterize_floor_plan {
@@ -97,6 +101,9 @@ global {
                 }
             }
         }
+
+        floor_interior_cells <- floor_cells;
+        floor_open_cells     <- floor_cells where (!each.is_obstacle);
 
         write "[Grid Rasterizer] Rasterize hoàn tất: "
             + length(grid_cell where each.is_obstacle)  + " obstacle, "
