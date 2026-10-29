@@ -62,15 +62,23 @@ global {
         point pt <- #user_location;
 
         if (pt.x >= 4.0 and pt.x <= 44.0) {
+            int prev_floor <- selected_floor;
             // 1. Lưu snapshot trạng thái lửa/khói của tầng hiện tại
             do save_current_floor_state;
 
-            // 2. Chuyển tầng và vẽ lại kiến trúc sàn
+            // 2. Chuyển tầng (chỉ vẽ lại vector nếu đổi giữa Tầng Trệt và Tầng Điển Hình)
             do select_floor;
-            do rasterize_floor_plan;
 
-            // 3. Phục hồi trạng thái lửa/khói riêng biệt của tầng mới chọn
-            do restore_active_floor_state;
+            bool prev_is_ground <- (prev_floor = 0);
+            bool curr_is_ground <- (selected_floor = 0);
+            if (prev_is_ground != curr_is_ground) {
+                do rasterize_floor_plan;
+            }
+
+            // 3. Phục hồi trạng thái lửa/khói riêng biệt của tầng mới chọn tức thời (0 delay)
+            if (selected_floor != prev_floor) {
+                do restore_active_floor_state;
+            }
         } else if (pt.x >= 49.0 and pt.x <= 93.0 and pt.y >= 16.0 and pt.y <= 60.0) {
             // Click chọn điểm phát hỏa chính xác theo tọa độ chuột
             do place_fire_at_click;
@@ -140,7 +148,7 @@ experiment Grenfell_Modular_Simulation type: gui {
                 
                 string phase_str <- (fire_phase = 0) ? "CHƯA BẮT ĐẦU (Click chuột vào sàn để đặt điểm cháy)" :
                     ((!cladding_ignited) ? "GIAI ĐOẠN 1: Lửa đang lan trong phòng (Chờ lan tới cửa sổ để bứt phá Cladding mặt ngoài...)" :
-                    ((!crown_reached) ? ("GIAI ĐOẠN 2: Lửa Cladding mặt Đông đang bốc lên TẦNG " + highest_east_floor + "/24") :
+                    ((!crown_reached) ? ("GIAI ĐOẠN 2: Lửa Cladding mặt Đông đang bốc lên TẦNG " + highest_east_floor + "/" + test_max_floor) :
                     ("GIAI ĐOẠN 3: Lan đỉnh Crown -> Chữ V ngược xuống mặt Bắc/Nam (Tầng " + v_lowest_floor + ") & mặt Tây")));
 
                 string clad_status <- (cur_fl = nil) ? "" :
@@ -150,7 +158,7 @@ experiment Grenfell_Modular_Simulation type: gui {
                     + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Than đen" : ((cur_fl.clad_south > 0.1) ? "CHÁY RỰC" : "An toàn"))
                     + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Than đen" : ((cur_fl.clad_west > 0.1) ? "CHÁY RỰC" : "An toàn")));
 
-                bool stair_smoky <- (cur_fl != nil and cur_fl.interior_smoke_depth >= 18.0);
+                bool stair_smoky <- (cur_fl != nil and !empty(floor_interior_cells where (each.is_stairwell and each.smoky)));
 
                 // Dòng 1: Tiến trình lan truyền Sequence
                 draw "TIẾN TRÌNH: " + phase_str

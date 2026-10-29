@@ -18,6 +18,9 @@ global {
     int    selected_floor      <- 4;
     string selected_floor_name <- "4th (Flat 16)";
 
+    // [TEST MODE] Giới hạn số tầng mô phỏng (mặc định 8 để test mượt, đổi lại 24 khi chạy full 25 tầng)
+    int    test_max_floor      <- 8;
+
     // Tọa độ & kích thước mặt bằng 2D bên phải (44.0 = 22.0m × 2.0 px/m)
     float px_origin  <- 49.0;
     float py_origin  <- 16.0;
@@ -89,7 +92,7 @@ global {
         ];
         float base_y <- 63.5;
         float f_step <- 2.12;
-        loop i from: 0 to: 24 {
+        loop i from: 0 to: test_max_floor {
             float y_b <- base_y - (i * f_step);
             float y_t <- y_b - f_step;
             float y_m <- (y_t + y_b) / 2.0;
@@ -429,11 +432,27 @@ global {
         if (click_pt.x >= 4.0 and click_pt.x <= 44.0) {
             ask floor_level_agt {
                 if (click_pt.y >= self.y_top and click_pt.y <= self.y_bot) {
+                    int prev_floor <- selected_floor;
                     selected_floor      <- self.floor_id;
                     selected_floor_name <- self.floor_label;
                     ask floor_level_agt { self.is_selected <- (self.floor_id = selected_floor); }
                     write "Khảo sát Tầng: " + selected_floor_name + " (Floor ID: " + selected_floor + ")";
-                    ask world { do build_active_floor_plan; }
+
+                    bool prev_is_ground <- (prev_floor = 0);
+                    bool curr_is_ground <- (selected_floor = 0);
+                    if (prev_is_ground != curr_is_ground) {
+                        ask world { do build_active_floor_plan; }
+                    } else {
+                        // Tầng ở (1..24) dùng chung 100% bản vẽ vector, chỉ đổi tiêu đề tức thời (0 delay)
+                        ask plan_label {
+                            m_text <- (selected_floor = 4) ?
+                                "MẶT BẰNG TẦNG 4: CHI TIẾT ĐẦY ĐỦ FLAT 16 & CÁC CĂN HỘ" :
+                                ("MẶT BẰNG TẦNG " + selected_floor_name + " (TYPICAL RESIDENTIAL FLOOR)");
+                            s_text <- (selected_floor = 4) ?
+                                "Sàn 22m x 22m: Flat 16 có đầy đủ nội thất & Tủ lạnh phát hỏa (ORIGIN), 5 căn hộ còn lại thể hiện rõ ràng cấu trúc phân phòng" :
+                                "Sàn điển hình 22m x 22m: 6 Căn hộ phân chia phòng chuẩn xác, Lõi trung tâm 8m x 8m (2 Thang máy, Thang bộ thoát hiểm)";
+                        }
+                    }
                 }
             }
         }
@@ -467,8 +486,10 @@ species floor_level_agt {
     // --- BỘ ĐỆM TẾ BÀO LỬA & KHÓI ĐỘC LẬP CHO TỪNG TẦNG (MULTI-FLOOR BUFFER) ---
     list<int>          floor_burning_cells     <- []; // Danh sách index các ô đang cháy
     map<int, float>    floor_fire_power        <- []; // Index -> mức độ lửa (0.0 - 1.0)
+    list<int>          floor_fire_frontier     <- []; // Danh sách các ô biên lửa đang bành trướng ngầm
     list<int>          floor_smoky_cells       <- []; // Danh sách index các ô có khói
     map<int, float>    floor_smoke_density_map <- []; // Index -> nồng độ khói (0.0 - 1.0)
+    list<int>          floor_smoke_frontier    <- []; // Danh sách các ô biên khói đang lan truyền ngầm
     bool               floor_initialized_fire  <- false; // Đã gieo mầm cháy đầu tiên chưa
 
     // Hàm chuyển đổi mức độ cháy Cladding sang màu trực quan

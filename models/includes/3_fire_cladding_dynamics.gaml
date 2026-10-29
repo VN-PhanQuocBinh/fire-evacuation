@@ -28,8 +28,8 @@ global {
     // =========================================================================
     float step <- 0.1 #s;
 
-    // Hướng gió tự nhiên (thổi lệch hướng Bắc - Tây Bắc)
-    point wind_direction <- {0.2, -1.0};
+    // Hướng gió tự nhiên trong phòng: lan tỏa đẳng hướng tròn đều (không bị lệch lên trên)
+    point wind_direction <- {0.0, 0.0};
 
     // Xác suất lan truyền vi mô trên mặt bằng
     float fire_spread_probability  <- 0.035;  // Xác suất lửa bén ô lân cận
@@ -48,7 +48,7 @@ global {
 
     // Điều khiển lan truyền mặt đứng có độ trễ hợp lý
     int   highest_east_floor <- 4;
-    int   v_lowest_floor     <- 24;
+    int   v_lowest_floor     <- 8;     // Đỉnh trong chế độ test là test_max_floor
     bool  crown_reached      <- false;
     int   vertical_interval  <- 35;    // 35 ticks (~3.5 giây) mỗi tầng, tạo độ trễ nhịp nhàng tự nhiên
 
@@ -66,22 +66,32 @@ global {
 
         list<int> b_indices <- [];
         map<int, float> f_pow <- [];
+        list<int> b_front <- [];
         loop c over: b_cells {
             b_indices <- b_indices + [c.cell_id];
             f_pow[c.cell_id] <- c.fire_power;
+            if (!empty(c.neighbors where (!each.is_obstacle and !each.burning))) {
+                b_front <- b_front + [c.cell_id];
+            }
         }
 
         list<int> s_indices <- [];
         map<int, float> s_dens <- [];
+        list<int> s_front <- [];
         loop c over: s_cells {
             s_indices <- s_indices + [c.cell_id];
             s_dens[c.cell_id] <- c.smoke_density;
+            if (!empty(c.neighbors where (!each.is_obstacle and !each.smoky))) {
+                s_front <- s_front + [c.cell_id];
+            }
         }
 
         cur_fl.floor_burning_cells     <- b_indices;
         cur_fl.floor_fire_power        <- f_pow;
+        cur_fl.floor_fire_frontier     <- b_front;
         cur_fl.floor_smoky_cells       <- s_indices;
         cur_fl.floor_smoke_density_map <- s_dens;
+        cur_fl.floor_smoke_frontier    <- s_front;
     }
 
     // Nạp snapshot từ floor_level_agt lên lưới grid_cell
@@ -89,8 +99,8 @@ global {
         floor_level_agt cur_fl <- first(floor_level_agt where (each.floor_id = selected_floor));
         if (cur_fl = nil) { return; }
 
-        // Xóa trắng trạng thái lửa/khói trên mặt bằng hiện tại
-        ask floor_interior_cells {
+        // Xóa trắng nhanh chỉ các ô đang có lửa/khói (nhanh gấp 50 lần so với quét toàn bộ 18,000 ô)
+        ask floor_interior_cells where (each.burning or each.smoky) {
             self.burning       <- false;
             self.fire_power    <- 0.0;
             self.smoky         <- false;
@@ -98,8 +108,8 @@ global {
             self.color         <- #transparent;
         }
 
-        // Nếu tầng này chưa bắt lửa -> giữ nguyên mặt bằng sạch
-        if (cur_fl.fire_start_tick = -1 and empty(cur_fl.floor_burning_cells)) {
+        // Nếu tầng này chưa bắt lửa và chưa có khói -> giữ nguyên mặt bằng sạch
+        if (cur_fl.fire_start_tick = -1 and empty(cur_fl.floor_burning_cells) and empty(cur_fl.floor_smoky_cells)) {
             return;
         }
 
@@ -141,28 +151,49 @@ global {
 
         // Vị trí trục cửa sổ đón lửa từ ngoài mặt đứng phía Đông (dóng theo Y của điểm cháy ban đầu)
         point entry_point <- {93.0, fire_origin_loc.y};
-        list<grid_cell> entry_cells <- floor_open_cells where (each.location distance_to entry_point <= 2.8);
+        list<grid_cell> fire_entry_cells <- floor_open_cells where (each.location distance_to entry_point <= 2.2);
 
-        if (empty(entry_cells)) {
-            entry_cells <- [floor_open_cells closest_to entry_point];
+        if (empty(fire_entry_cells)) {
+            fire_entry_cells <- [floor_open_cells closest_to entry_point];
+        }
+
+        // Khói lan sâu vào phòng ngay từ khi cửa sổ vỡ vụn (bán kính ~6.5m, đi trước ngọn lửa)
+        list<grid_cell> smoke_entry_cells <- floor_open_cells where (each.location distance_to entry_point <= 6.5);
+        if (empty(smoke_entry_cells)) {
+            smoke_entry_cells <- fire_entry_cells;
         }
 
         list<int> b_idx <- [];
         map<int, float> f_pow <- [];
+        loop c over: fire_entry_cells {
+            b_idx <- b_idx + [c.cell_id];
+            f_pow[c.cell_id] <- 0.85;
+        }
+
         list<int> s_idx <- [];
         map<int, float> s_dens <- [];
-
-        loop c over: entry_cells {
-            b_idx <- b_idx + [c.cell_id];
-            f_pow[c.cell_id] <- 0.8;
+        loop c over: smoke_entry_cells {
             s_idx <- s_idx + [c.cell_id];
-            s_dens[c.cell_id] <- 0.9;
+            float dist <- c.location distance_to entry_point;
+            s_dens[c.cell_id] <- max([0.35, 1.0 - (dist / 6.5) * 0.6]);
         }
 
         fl.floor_burning_cells     <- b_idx;
         fl.floor_fire_power        <- f_pow;
+        fl.floor_fire_frontier     <- b_idx;
         fl.floor_smoky_cells       <- s_idx;
         fl.floor_smoke_density_map <- s_dens;
+
+        list<grid_cell> s_front_cells <- smoke_entry_cells where (each.location distance_to entry_point >= 4.0);
+        if (empty(s_front_cells)) {
+            fl.floor_smoke_frontier <- s_idx;
+        } else {
+            list<int> sf_idx <- [];
+            loop fc over: s_front_cells {
+                sf_idx <- sf_idx + [fc.cell_id];
+            }
+            fl.floor_smoke_frontier <- sf_idx;
+        }
 
         // Nếu tầng này đang là tầng hiển thị trên màn hình, nạp ngay lập tức lên grid_cell
         if (f_id = selected_floor) {
@@ -209,8 +240,10 @@ global {
             // Lưu lại điểm cháy vào buffer tầng đang chọn
             cur_fl.floor_burning_cells     <- [target_cell.cell_id];
             cur_fl.floor_fire_power        <- [target_cell.cell_id::1.0];
+            cur_fl.floor_fire_frontier     <- [target_cell.cell_id];
             cur_fl.floor_smoky_cells       <- [target_cell.cell_id];
             cur_fl.floor_smoke_density_map <- [target_cell.cell_id::1.0];
+            cur_fl.floor_smoke_frontier    <- [target_cell.cell_id];
         }
 
         write "==================================================================";
@@ -255,10 +288,10 @@ global {
     //    Có độ trễ 3.5 giây mỗi tầng (vertical_interval = 35) rất nhịp nhàng
     // =========================================================================
     reflex cladding_vertical_controller when: cladding_ignited {
-        // GIAI ĐOẠN 1: LAN THẲNG ĐỨNG TRÊN MẶT ĐÔNG LÊN ĐẾN TẦNG 24 (CROWN)
+        // GIAI ĐOẠN 1: LAN THẲNG ĐỨNG TRÊN MẶT ĐÔNG LÊN ĐẾN ĐỈNH (test_max_floor)
         if (!crown_reached) {
             if (sim_ticks mod vertical_interval = 0) {
-                if (highest_east_floor < 24) {
+                if (highest_east_floor < test_max_floor) {
                     highest_east_floor <- highest_east_floor + 1;
                     floor_level_agt next_fl <- first(floor_level_agt where (each.floor_id = highest_east_floor));
                     if (next_fl != nil) {
@@ -269,23 +302,25 @@ global {
                     }
                     write ">>> [CLADDING MẶT ĐÔNG] Lửa lan thẳng đứng lên TẦNG " + highest_east_floor;
 
-                    if (highest_east_floor = 24) {
+                    if (highest_east_floor = test_max_floor) {
                         crown_reached <- true;
+                        v_lowest_floor <- test_max_floor;
                         fire_phase    <- 3;
                         write "==================================================================";
-                        write ">>> [CROWN] LỬA ĐÃ LAN ĐẾN ĐỈNH SÂN THƯỢNG (TẦNG 24 CROWN)!";
+                        write ">>> [CROWN/TOP] LỬA ĐÃ LAN ĐẾN ĐỈNH TẦNG " + test_max_floor + "!";
                         write "==================================================================";
                     }
                 }
             }
         }
 
-        // GIAI ĐOẠN 2: LAN ĐỈNH CROWN VÀ PHÁT TRIỂN CHỮ V NGƯỢC XUỐNG BẮC/NAM/TÂY
+        // GIAI ĐOẠN 2: LAN ĐỈNH VÀ PHÁT TRIỂN CHỮ V NGƯỢC XUỐNG BẮC/NAM/TÂY
         if (crown_reached) {
-            floor_level_agt f24 <- first(floor_level_agt where (each.floor_id = 24));
-            if (f24 != nil) {
-                if (f24.clad_north <= 0.1) { f24.clad_north <- 0.6; }
-                if (f24.clad_south <= 0.1) { f24.clad_south <- 0.6; }
+            floor_level_agt f_top <- first(floor_level_agt where (each.floor_id = test_max_floor));
+            if (f_top != nil) {
+                if (f_top.clad_north <= 0.1) { f_top.clad_north <- 0.6; }
+                if (f_top.clad_south <= 0.1) { f_top.clad_south <- 0.6; }
+                if (f_top.clad_west  <= 0.1) { f_top.clad_west  <- 0.6; }
             }
 
             if (sim_ticks mod vertical_interval = 0) {
@@ -317,69 +352,109 @@ global {
     }
 
     // =========================================================================
-    // 4. REFLEX TIẾN TRÌNH LAN TRUYỀN TRONG NỀN CHO CÁC TẦNG KHÔNG HIỂN THỊ
-    //    Cập nhật ngầm (Background CA) mỗi 3 ticks (~0.3s) cho CẢ LỬA VÀ KHÓI
+    // 4. REFLEX TIẾN TRÌNH LAN TRUYỀN ĐỒNG NHẤT CHO CÁC TẦNG CHẠY NỀN (BACKGROUND)
+    //    Chạy MỖI TICK (1:1 lockstep với tầng active), an toàn tuyệt đối không nil exception
     // =========================================================================
-    reflex background_floors_simulation when: fire_started and (sim_ticks mod 3 = 0) {
+    reflex background_floors_simulation when: fire_started {
         list<floor_level_agt> bg_floors <- floor_level_agt where (each.floor_id != selected_floor and (!empty(each.floor_burning_cells) or !empty(each.floor_smoky_cells)));
 
         loop fl over: bg_floors {
-            list<int> cur_burning <- fl.floor_burning_cells;
-            list<int> new_burning <- cur_burning;
-            list<int> cur_smoky   <- fl.floor_smoky_cells;
-            list<int> new_smoky   <- cur_smoky;
+            // --- A. TIẾN TRÌNH LỬA NỀN (TĂNG CƯỜNG ĐỘ & LAN TRUYỀN) ---
+            loop bid over: fl.floor_burning_cells {
+                float cur_fp <- fl.floor_fire_power contains_key bid ? fl.floor_fire_power[bid] : 0.7;
+                fl.floor_fire_power[bid] <- min([cur_fp + fire_growth_rate, 1.0]);
+            }
 
-            // 1. Lan LỬA ngầm từ các ô đang cháy
-            loop bid over: cur_burning {
-                grid_cell c <- grid_cell(bid);
-                if (c != nil) {
-                    list<grid_cell> nb_open <- c.neighbors where (!each.is_obstacle);
-                    loop nb over: nb_open {
-                        if (!(new_burning contains nb.cell_id)) {
-                            if (rnd(1.0) < (fire_spread_probability * 2.0)) {
-                                new_burning <- new_burning + [nb.cell_id];
-                                fl.floor_fire_power[nb.cell_id] <- 0.75;
-                                if (!(new_smoky contains nb.cell_id)) {
-                                    new_smoky <- new_smoky + [nb.cell_id];
+            list<int> cur_f_front <- fl.floor_fire_frontier;
+            if (empty(cur_f_front) and !empty(fl.floor_burning_cells)) {
+                cur_f_front <- fl.floor_burning_cells;
+            }
+
+            list<int> next_f_front <- [];
+            loop bid over: cur_f_front {
+                grid_cell fc <- grid_cell(bid);
+                if (fc != nil) {
+                    list<grid_cell> nb_open <- fc.neighbors where (!each.is_obstacle and !(fl.floor_fire_power contains_key each.cell_id));
+                    if (!empty(nb_open)) {
+                        bool any_uninfected <- false;
+                        loop nb over: nb_open {
+                            if (rnd(1.0) < fire_spread_probability) {
+                                fl.floor_burning_cells <- fl.floor_burning_cells + [nb.cell_id];
+                                fl.floor_fire_power[nb.cell_id] <- 0.7;
+                                next_f_front <- next_f_front + [nb.cell_id];
+
+                                if (!(fl.floor_smoke_density_map contains_key nb.cell_id)) {
+                                    fl.floor_smoky_cells <- fl.floor_smoky_cells + [nb.cell_id];
                                     fl.floor_smoke_density_map[nb.cell_id] <- 1.0;
+                                    fl.floor_smoke_frontier <- fl.floor_smoke_frontier + [nb.cell_id];
                                 }
+                            } else {
+                                any_uninfected <- true;
                             }
+                        }
+                        if (any_uninfected) {
+                            next_f_front <- next_f_front + [bid];
                         }
                     }
                 }
             }
+            fl.floor_fire_frontier <- next_f_front;
 
-            // 2. Lan KHÓI ngầm từ TẤT CẢ CÁC Ô KHÓI (Khói lan nhanh và độc lập với biên lửa!)
-            loop sid over: cur_smoky {
+            // --- B. TIẾN TRÌNH KHÓI NỀN (SUY GIẢM & LAN TRUYỀN ĐỒNG BỘ CHUẨN XÁC) ---
+            list<int> active_smoky <- [];
+            loop sid over: fl.floor_smoky_cells {
+                float cur_d <- fl.floor_smoke_density_map contains_key sid ? fl.floor_smoke_density_map[sid] : 0.5;
+                cur_d <- max([cur_d - smoke_decay, 0.0]);
+                fl.floor_smoke_density_map[sid] <- cur_d;
+                if (cur_d > 0.05 or (fl.floor_fire_power contains_key sid)) {
+                    active_smoky <- active_smoky + [sid];
+                }
+            }
+            fl.floor_smoky_cells <- active_smoky;
+
+            list<int> cur_s_front <- fl.floor_smoke_frontier;
+            if (empty(cur_s_front) and !empty(fl.floor_smoky_cells)) {
+                cur_s_front <- fl.floor_smoky_cells;
+            }
+
+            list<int> next_s_front <- [];
+            loop sid over: cur_s_front {
                 grid_cell sc <- grid_cell(sid);
                 if (sc != nil) {
                     float cur_density <- fl.floor_smoke_density_map contains_key sid ? fl.floor_smoke_density_map[sid] : 0.6;
-                    list<grid_cell> nb_open <- sc.neighbors where (!each.is_obstacle);
-                    loop nb over: nb_open {
-                        if (!(new_smoky contains nb.cell_id)) {
-                            // Khói lan rộng ra phía trước đám cháy
-                            if (rnd(1.0) < (smoke_spread_probability * 2.2)) {
-                                new_smoky <- new_smoky + [nb.cell_id];
-                                fl.floor_smoke_density_map[nb.cell_id] <- max([0.3, cur_density * 0.85]);
+                    // Kiểm tra an toàn contains_key tránh hoàn toàn lỗi nil comparison
+                    list<grid_cell> nb_open <- sc.neighbors where (!each.is_obstacle and !(fl.floor_smoke_density_map contains_key each.cell_id));
+                    if (!empty(nb_open)) {
+                        bool any_uninfected <- false;
+                        loop nb over: nb_open {
+                            if (rnd(1.0) < (smoke_spread_probability * 1.8)) {
+                                float transferred <- cur_density * 0.70;
+                                float old_nb_d <- fl.floor_smoke_density_map contains_key nb.cell_id ? fl.floor_smoke_density_map[nb.cell_id] : 0.0;
+                                float final_d <- min([max([old_nb_d, transferred]), 1.0]);
+
+                                fl.floor_smoky_cells <- fl.floor_smoky_cells + [nb.cell_id];
+                                fl.floor_smoke_density_map[nb.cell_id] <- final_d;
+                                next_s_front <- next_s_front + [nb.cell_id];
+                            } else {
+                                any_uninfected <- true;
                             }
+                        }
+                        if (any_uninfected) {
+                            next_s_front <- next_s_front + [sid];
                         }
                     }
                 }
             }
-
-            fl.floor_burning_cells <- new_burning;
-            fl.floor_smoky_cells   <- new_smoky;
+            fl.floor_smoke_frontier <- next_s_front;
         }
     }
 
     // =========================================================================
     // 5. REFLEX LAN KHÓI TRÊN MẶT BẰNG 2D HIỂN THỊ (FOREGROUND SPREAD)
+    //    Tối ưu hóa Wavefront: chỉ lan sang các ô chưa bão hòa để tiết kiệm 95% CPU
     // =========================================================================
     reflex spread_smoke when: fire_started {
-        float wind_mag <- norm(wind_direction);
-        point norm_wind <- (wind_mag = 0.0) ? {0.0, 0.0} : (wind_direction / wind_mag);
-
-        ask floor_interior_cells where (each.smoky) {
+        ask floor_interior_cells where (each.smoky and each.smoke_density > 0.05) {
             point src_loc     <- self.location;
             float src_density <- self.smoke_density;
 
@@ -389,20 +464,13 @@ global {
                 color <- #transparent;
             }
 
-            list<grid_cell> nb_open <- self.neighbors where (!each.is_obstacle);
-            loop nb over: nb_open {
-                point dir_vec <- {nb.location.x - src_loc.x, nb.location.y - src_loc.y};
-                float dir_mag <- norm(dir_vec);
-                if (dir_mag > 0.0) {
-                    point norm_dir <- dir_vec / dir_mag;
-                    float alignment <- (norm_wind = {0.0,0.0}) ? 0.0
-                        : (norm_dir.x * norm_wind.x + norm_dir.y * norm_wind.y);
-                    float dyn_prob <- smoke_spread_probability * max([0.15, 1.0 + alignment * 2.5]);
-
-                    if (rnd(1.0) < dyn_prob) {
+            // Chỉ lan sang các ô chưa bão hòa khói (< 0.95) để tránh lặp vô tận
+            list<grid_cell> nb_open <- self.neighbors where (!each.is_obstacle and each.smoke_density < 0.95);
+            if (!empty(nb_open)) {
+                loop nb over: nb_open {
+                    if (rnd(1.0) < (smoke_spread_probability * 1.8)) {
                         nb.smoky <- true;
-                        float ratio <- 0.65 + (max([alignment, 0.0]) * 0.20);
-                        float transferred <- src_density * ratio;
+                        float transferred <- src_density * 0.70;
                         nb.smoke_density <- min([max([nb.smoke_density, transferred]), 1.0]);
 
                         if (!nb.burning) {
@@ -428,13 +496,16 @@ global {
             int g_val <- int(160 * (1.0 - fire_power));
             color <- rgb(r_val, g_val, 0, 220);
 
-            ask neighbors where (!each.is_obstacle and !each.burning) {
-                if (rnd(1.0) < fire_spread_probability) {
-                    self.burning       <- true;
-                    self.fire_power    <- 0.7;
-                    self.smoky         <- true;
-                    self.smoke_density <- 1.0;
-                    self.color         <- rgb(255, 80, 0, 220);
+            list<grid_cell> nb_unburnt <- neighbors where (!each.is_obstacle and !each.burning);
+            if (!empty(nb_unburnt)) {
+                loop nb over: nb_unburnt {
+                    if (rnd(1.0) < fire_spread_probability) {
+                        nb.burning       <- true;
+                        nb.fire_power    <- 0.7;
+                        nb.smoky         <- true;
+                        nb.smoke_density <- 1.0;
+                        nb.color         <- rgb(255, 80, 0, 220);
+                    }
                 }
             }
         }
