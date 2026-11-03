@@ -19,9 +19,11 @@ import "includes/4_people_evacuation.gaml"
 global {
     // Kích thước môi trường toàn cục cố định (100m × 75m)
     geometry shape <- rectangle(100.0, 75.0) at_location {50.0, 37.5};
+    bool is_test_mode <- false;
 
     init {
         write "=== KHỞI TẠO MÔ HÌNH GRENFELL TOWER (MODULAR DUAL-LAYER) ===";
+        v_lowest_floor <- test_max_floor;
 
         // 1. Dựng bản vẽ kiến trúc (mặt đứng bên trái + mặt bằng bên phải)
         do build_tower_elevation;
@@ -90,6 +92,8 @@ global {
 // EXPERIMENT CHÍNH
 // =============================================================================
 experiment Grenfell_Modular_Simulation type: gui {
+    parameter "Giới hạn số tầng mô phỏng" var: test_max_floor category: "Cấu hình Tòa Nhà" min: 4 max: 24 step: 1;
+    parameter "Mô phỏng Dân số Toàn tháp (~290 người)" var: full_tower_population category: "Cấu hình Sơ Tán";
 
     action handle_click {
         ask simulation { do handle_click; }
@@ -109,10 +113,16 @@ experiment Grenfell_Modular_Simulation type: gui {
             species plan_element;
             species plan_label;
 
-            // 4. Lớp Lửa & Khói (Grid Cell): chỉ hiển thị ô có lửa hoặc khói
+            // 4. Lớp Lửa & Khói
             species grid_cell aspect: default;
 
-            // 5. Trang trí La bàn & Khung nét đứt Limit of the model
+            // 5. Cửa buồng thang thoát hiểm SFPE (FIFO Bottleneck)
+            species stair_door;
+
+            // 6. Quần thể Cư dân (Tác tử người Occupant với hiển thị 2 chiều Sức khỏe - Hoảng sợ)
+            species occupant aspect: default;
+
+            // 7. Trang trí La bàn & Khung nét đứt Limit of the model
             graphics "Decorations" {
                 float px1 <- 49.0; float px2 <- 93.0;
                 float py1 <- 16.0; float py2 <- 60.0;
@@ -129,22 +139,22 @@ experiment Grenfell_Modular_Simulation type: gui {
                     float l_y2 <- py1 + (14.8 * 2.0);
                     loop i from: 0 to: 9 {
                         float bx <- l_x1 + (i * 1.5);
-                        draw line([{bx, l_y1},{bx + 0.9, l_y1}]) color: #white;
-                        draw line([{bx, l_y2},{bx + 0.9, l_y2}]) color: #white;
+                        draw line([{bx, l_y1},{bx + 0.9, l_y1}]) color: rgb(210,40,40);
+                        draw line([{bx, l_y2},{bx + 0.9, l_y2}]) color: rgb(210,40,40);
                     }
                     loop j from: 0 to: 18 {
                         float by <- l_y1 + (j * 1.5);
-                        draw line([{l_x1, by},{l_x1, by + 0.9}]) color: #white;
-                        draw line([{l_x2, by},{l_x2, by + 0.9}]) color: #white;
+                        draw line([{l_x1, by},{l_x1, by + 0.9}]) color: rgb(210,40,40);
+                        draw line([{l_x2, by},{l_x2, by + 0.9}]) color: rgb(210,40,40);
                     }
                     draw "Limit of the model" at: {l_x2 + 1.2, l_y2}
                         color: rgb(210,40,40) font: font("Arial",10,#bold);
                 }
             }
 
-            // 6. HUD trạng thái & Tiến trình lan truyền
+            // 8. HUD trạng thái, Tiến trình lan truyền & Thống kê Sơ tán
             graphics "HUD_Status" {
-                floor_level_agt cur_fl <- first(floor_level_agt where (each.floor_id = selected_floor));
+                floor_level_agt cur_fl <- floor_map contains_key selected_floor ? floor_map[selected_floor] : nil;
                 
                 string phase_str <- (fire_phase = 0) ? "CHƯA BẮT ĐẦU (Click chuột vào sàn để đặt điểm cháy)" :
                     ((!cladding_ignited) ? "GIAI ĐOẠN 1: Lửa đang lan trong phòng (Chờ lan tới cửa sổ để bứt phá Cladding mặt ngoài...)" :
@@ -158,24 +168,44 @@ experiment Grenfell_Modular_Simulation type: gui {
                     + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Than đen" : ((cur_fl.clad_south > 0.1) ? "CHÁY RỰC" : "An toàn"))
                     + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Than đen" : ((cur_fl.clad_west > 0.1) ? "CHÁY RỰC" : "An toàn")));
 
-                bool stair_smoky <- (cur_fl != nil and !empty(floor_interior_cells where (each.is_stairwell and each.smoky)));
+                bool stair_smoky <- !empty(active_smoky_cells where (each.is_stairwell));
 
                 // Dòng 1: Tiến trình lan truyền Sequence
-                draw "TIẾN TRÌNH: " + phase_str
-                    at: {49.0, 63.8} color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",10,#bold);
+                draw "TIẾN TRÌNH LỬA: " + phase_str
+                    at: {49.0, 61.8} color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",9,#bold);
 
                 // Dòng 2: Trạng thái tầng đang xem & Buồng thang bộ
                 draw "TẦNG " + selected_floor_name + clad_status
-                    at: {49.0, 66.5} color: rgb(20,35,75) font: font("Arial",9,#bold);
+                    at: {49.0, 63.8} color: rgb(20,35,75) font: font("Arial",8,#bold);
 
-                draw (stair_smoky ? "⚠️ THANG BỘ: NHIỄM KHÓI ĐỘC (NGUY HIỂM) | CỬA SỔ: " + ((cur_fl.window_broken) ? "VỠ / TÁP LỬA NỘI THẤT" : "BÌNH THƯỜNG") :
+                draw (stair_smoky ? "⚠️ THANG BỘ: NHIỄM KHÓI ĐỘC (NGUY HIỂM) | CỬA SỔ: " + ((cur_fl != nil and cur_fl.window_broken) ? "VỠ / TÁP LỬA NỘI THẤT" : "BÌNH THƯỜNG") :
                                    "✅ THANG BỘ: THÔNG THOÁNG / AN TOÀN (Khói chưa lan tới sảnh)")
-                    at: {49.0, 69.0} color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",9,#bold);
+                    at: {49.0, 65.6} color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",8,#bold);
 
-                // Dòng 3: Hướng dẫn người dùng
-                draw "HƯỚNG DẪN: Click TRÁI vào cột Mặt đứng bên trái để chuyển tầng | Click chuột vào bất kỳ đâu trên mặt bằng để đặt mồi lửa"
-                    at: {49.0, 71.5} color: rgb(50,60,80) font: font("Arial",8,#plain);
+                // Dòng 3: Thống kê Dân cư Sơ tán Thời gian thực
+                string pop_str <- "👥 DÂN CƯ SƠ TÁN (" + total_occupants_count + " người): "
+                    + "Ở yên: " + stay_put_count + " | "
+                    + "Chuẩn bị: " + preparing_count + " | "
+                    + "Đang chạy: " + evacuating_count + " | "
+                    + "Chờ cửa thang: " + waiting_door_count + " | "
+                    + "Quay đầu lên cao: " + retreating_count + " | "
+                    + "ĐÃ THOÁT: " + evacuated_count + " | "
+                    + "THƯƠNG VONG: " + casualties_count;
+                draw pop_str at: {49.0, 67.4} color: rgb(15,30,80) font: font("Arial",8,#bold);
+
+                // Dòng 4: Đối chiếu Số liệu Thực tế Grenfell Inquiry
+                string bench_str <- "📊 THỰC TẾ GRENFELL: <01:30 (112 thoát) | 01:30-01:36 (36 thoát) | 01:40-01:50 (20 thoát) | >01:50 (Cầu thang cắt đứt, kẹt tầng 20-23)";
+                draw bench_str at: {49.0, 69.2} color: rgb(90,40,110) font: font("Arial",7,#italic);
+
+                // Dòng 5: Chú giải Trực quan (Legend)
+                string leg_str <- "🎨 CHÚ GIẢI: Lõi Sức khỏe (🟢 Khỏe >85% | 🟡 Nhẹ >60% | 🟠 Độc >30% | 🔴 Nguy kịch | ⚫ Chết [X]) | Vòng Hào quang 🟣 Tím Neon: Hoảng loạn quay đầu | Viền đôi: Người già";
+                draw leg_str at: {49.0, 70.9} color: rgb(50,70,95) font: font("Arial",7,#plain);
+
+                // Dòng 6: Hướng dẫn người dùng
+                draw "HƯỚNG DẪN: Click TRÁI cột Mặt đứng bên trái để chuyển tầng | Click chuột vào mặt bằng để đặt mồi lửa"
+                    at: {49.0, 72.6} color: rgb(80,90,110) font: font("Arial",7,#plain);
             }
         }
     }
 }
+

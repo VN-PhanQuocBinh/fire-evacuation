@@ -19,7 +19,8 @@ global {
     string selected_floor_name <- "4th (Flat 16)";
 
     // [TEST MODE] Giới hạn số tầng mô phỏng (mặc định 8 để test mượt, đổi lại 24 khi chạy full 25 tầng)
-    int    test_max_floor      <- 8;
+    int    test_max_floor      <- 24;
+    map<int, floor_level_agt> floor_map <- [];
 
     // Tọa độ & kích thước mặt bằng 2D bên phải (44.0 = 22.0m × 2.0 px/m)
     float px_origin  <- 49.0;
@@ -104,6 +105,7 @@ global {
                 shape: create_box(4.0, y_t, 44.0, y_b)
             ];
         }
+        floor_map <- map(floor_level_agt collect (each.floor_id::each));
     }
 
     // =========================================================================
