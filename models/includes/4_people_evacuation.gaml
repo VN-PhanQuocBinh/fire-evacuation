@@ -313,7 +313,8 @@ species occupant skills: [moving] {
         current_speed <- base_speed;
 
         // Random thời gian trễ nhận thức (Lognormal Distribution)
-        pre_evacuation_delay <- min([max([exp(4.2 + 0.6 * gauss(0, 1)), 60.0]), 600.0]);
+        // Tinh chỉnh: Phân phối trung bình ~40s (15s - 180s) thay vì quá dài, giúp cư dân có cơ hội sơ tán
+        pre_evacuation_delay <- min([max([exp(3.6 + 0.5 * gauss(0, 1)), 15.0]), 240.0]);
 
         // Random xác suất quên đóng cửa khi tháo chạy (Bernoulli 40%)
         leave_door_open <- flip(0.40);
@@ -415,7 +416,7 @@ species occupant skills: [moving] {
                 // Người ở gần điểm click chuột phát hiện thấy lửa ngay lập tức
                 if (self distance_to fire_origin_loc <= 14.0) {
                     hazard_detected <- true;
-                    pre_evacuation_delay <- min([max([gauss(40.0, 15.0), 15.0]), 90.0]); // Chạy rất nhanh
+                    pre_evacuation_delay <- min([max([gauss(20.0, 8.0), 8.0]), 45.0]); // Phản ứng nhanh trong 8s - 35s
                 }
             } else {
                 // Đám cháy ở tầng khác: nhận biết qua khói hoặc lửa cladding lan tới

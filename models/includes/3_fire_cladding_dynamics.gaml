@@ -32,10 +32,11 @@ global {
     point wind_direction <- {0.0, 0.0};
 
     // Xác suất lan truyền vi mô trên mặt bằng (tương đương chu kỳ 0.5s)
-    float fire_spread_probability  <- 0.16;   // Xác suất lửa bén ô lân cận (tích lũy 0.5s)
-    float smoke_spread_probability <- 0.25;   // Xác suất khói lan ô lân cận
-    float smoke_decay              <- 0.025;  // Suy giảm nồng độ khói
-    float fire_growth_rate         <- 0.08;   // Tăng cường độ lửa
+    // Tinh chỉnh theo Phương án 1: Giảm xác suất để lửa và khói lan từ từ trong 45-60s
+    float fire_spread_probability  <- 0.06;   // Xác suất lửa bén ô lân cận (giảm từ 0.16 -> 0.06)
+    float smoke_spread_probability <- 0.10;   // Xác suất khói lan ô lân cận (giảm từ 0.25 -> 0.10)
+    float smoke_decay              <- 0.015;  // Suy giảm nồng độ khói
+    float fire_growth_rate         <- 0.04;   // Tăng cường độ lửa
 
     // Điều khiển trạng thái toàn cục
     bool  fire_started       <- false; // Đã click đặt lửa trong phòng
@@ -46,12 +47,13 @@ global {
     // Tọa độ điểm xuất phát cháy ban đầu (để dóng thẳng trục đứng cho các tầng trên)
     point fire_origin_loc    <- {91.5, 22.5}; // Mặc định vị trí bếp Flat 16 phía Đông
 
-    // Điều khiển lan truyền mặt đứng có độ trễ hợp lý (7 ticks x 0.5s = 3.5s mỗi tầng)
+    // Điều khiển lan truyền mặt đứng có độ trễ hợp lý
+    // Tinh chỉnh theo Phương án 1: 18 ticks x 0.5s = 9.0s mỗi tầng (leo hết tháp ~3 phút)
     int   highest_east_floor <- 4;
     int   fire_origin_floor  <- 4;     // Tầng phát hỏa ban đầu
     int   v_lowest_floor     <- 24;    // Đỉnh khởi đầu chữ V ngược (tầng 24)
     bool  crown_reached      <- false;
-    int   vertical_interval  <- 7;     // 7 ticks (3.5 giây) mỗi tầng, tạo độ trễ nhịp nhàng tự nhiên
+    int   vertical_interval  <- 18;    // 18 ticks (9.0 giây) mỗi tầng, tạo độ trễ nhịp nhàng tự nhiên
 
     // --- CẢI TIẾN 2: FRONTIER WAVEFRONT TRACKING CHO TẦNG ĐANG HIỂN THỊ (FOREGROUND) ---
     list<grid_cell> active_burning_cells  <- [];
