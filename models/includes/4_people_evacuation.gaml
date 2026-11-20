@@ -16,8 +16,8 @@
  *      - Quay đầu leo lên tầng cao khi nhiệt độ buồng thang > 55°C
  *
  *   3. RANDOM SỐ LƯỢNG NGƯỜI TRONG CĂN PHÒNG:
- *      - Phân phối ngẫu nhiên (Poisson λ = 2.5) số người cho từng căn hộ
- *      - Random vị trí người rải đều bên trong ranh giới phòng
+ *      - Phân phối rời rạc có trọng số (trung bình 2.5 người) cho từng căn hộ
+ *      - Vị trí ngẫu nhiên trong phòng khách, bếp, phòng ngủ hoặc sảnh căn hộ
  *      - Random độ tuổi (Trẻ em 15%, Người lớn 65%, Người già 20%) và các phân phối Monte Carlo
  *
  *   4. PHÁT HỎA HOÀN TOÀN TÙY CHỌN BẰNG CLICK CHUỘT:
@@ -45,17 +45,18 @@ global {
     int evacuated_count       <- 0;
     int casualties_count      <- 0;
 
-    // Cấu hình: mô phỏng toàn tháp (~290 người) hoặc chỉ tầng đang xem (~15 người)
+    // Cấu hình: mô phỏng cư dân toàn tháp hoặc nhóm tầng thấp
     bool full_tower_population <- true;
+    bool building_alarm_active <- false;
 
     // Tọa độ mốc không gian (chuẩn theo hệ tọa độ kiến trúc 1_building_architecture)
     point lobby_center_pt <- {71.0, 38.0}; // Tâm sảnh chung
     point stair_door_pt   <- {74.4, 38.0}; // Cửa buồng thang thoát hiểm
     point inside_stair_pt <- {76.5, 38.0}; // Chiếu nghỉ trong buồng thang
-    point ground_exit_pt  <- {71.0, 59.0}; // Cửa chính thoát ra mặt đất tầng trệt
+    point ground_exit_pt  <- {71.0, 61.0}; // Bên ngoài cửa chính tầng trệt
 
     // Cửa buồng thang quản lý hàng đợi SFPE
-    stair_door building_stair_door;
+    map<int, stair_door> stair_doors <- [];
 
     // =========================================================================
     // II. KHỞI TẠO MODULE & RANDOM SỐ LƯỢNG NGƯỜI TRONG CĂN PHÒNG
@@ -63,11 +64,11 @@ global {
     action init_evacuation_module {
         write "[Evacuation] Khởi tạo cửa buồng thang và sinh dân cư trong các căn hộ...";
 
-        if (building_stair_door = nil) {
-            create stair_door {
-                location <- stair_door_pt;
-                building_stair_door <- self;
+        if (empty(stair_door)) {
+            loop f from: 1 to: min([test_max_floor, 23]) {
+                create stair_door with: [floor_id: f, location: stair_door_pt];
             }
+            stair_doors <- map(stair_door collect (each.floor_id::each));
         }
 
         do spawn_random_occupants;
@@ -78,10 +79,10 @@ global {
     action spawn_ground_floor_occupants {
         list<string> g_codes <- ["NURSERY_PLAY", "NURSERY_REST", "ESTATE_OFFICE", "MAIN_LOBBY"];
         list<float>  g_min_x <- [52.0, 72.0, 52.0, 67.0];
-        list<float>  g_max_x <- [68.0, 80.0, 63.0, 77.0];
+        list<float>  g_max_x <- [68.0, 80.0, 59.0, 74.0];
         list<float>  g_min_y <- [18.0, 18.0, 48.0, 48.0];
-        list<float>  g_max_y <- [28.0, 28.0, 58.0, 58.0];
-        list<point>  g_doors <- [{60.6, 30.0}, {72.0, 30.0}, {65.0, 50.0}, {71.0, 48.0}];
+        list<float>  g_max_y <- [28.0, 28.0, 52.0, 58.0];
+        list<point>  g_doors <- [{61.5, 30.0}, {72.0, 30.0}, {65.0, 50.0}, {71.0, 48.0}];
         list<int>    g_counts <- [6, 4, 3, 3]; // Tổng 16 người tầng trệt
 
         loop idx from: 0 to: 3 {
@@ -100,6 +101,10 @@ global {
                     current_floor     <- 0;
                     current_flat_code <- gcode;
                     flat_door_loc     <- gdoor;
+                    if (gcode = "ESTATE_OFFICE") { room_route <- [{60.0, 51.0}, {62.0, 51.0}]; }
+                    egress_route <- (gcode = "NURSERY_PLAY") ? [{61.5, 29.0}, {63.5, 29.0}, {63.5, 31.6}, {69.0, 31.6}, lobby_center_pt, ground_exit_pt] :
+                        ((gcode = "NURSERY_REST") ? [{71.0, 31.6}, lobby_center_pt, ground_exit_pt] :
+                        ((gcode = "ESTATE_OFFICE") ? [{67.0, 50.0}, {71.0, 50.0}, ground_exit_pt] : [ground_exit_pt]));
 
                     // Đặc thù tầng trệt: Nhà trẻ gồm 80% trẻ em, 20% cô giáo
                     if (gcode = "NURSERY_PLAY" or gcode = "NURSERY_REST") {
@@ -133,6 +138,7 @@ global {
                     // Rải ngẫu nhiên trong phòng
                     location <- {gx1 + rnd(gx2 - gx1), gy1 + rnd(gy2 - gy1)};
                     target_waypoint <- location;
+                    if (gcode = "MAIN_LOBBY") { flat_door_exited <- true; }
                 }
             }
         }
@@ -147,38 +153,86 @@ global {
         int max_f <- full_tower_population ? (test_max_floor - 1) : 4;
         if (max_f > 23) { max_f <- 23; }
 
-        // Định nghĩa phạm vi 6 căn phòng/khu vực trên mặt bằng sàn 22m x 22m
+        // Sáu căn hộ dùng cùng một mặt bằng với phép đối xứng qua tâm sàn.
         list<string> room_codes  <- ["X6", "X1", "X2", "X3", "X4", "X5"];
-        list<float>  room_min_x  <- [79.5, 84.5, 79.5, 49.5, 49.5, 49.5];
-        list<float>  room_max_x  <- [92.5, 92.5, 92.5, 62.5, 57.5, 62.5];
-        list<float>  room_min_y  <- [16.5, 30.5, 46.5, 46.5, 30.5, 16.5];
-        list<float>  room_max_y  <- [29.5, 37.5, 59.5, 59.5, 37.5, 29.5];
-        list<point>  room_doors  <- [{82.0, 25.2}, {84.0, 33.4}, {82.0, 50.8}, {60.0, 50.8}, {58.2, 33.4}, {60.0, 25.2}];
+        list<point>  room_doors  <- [{73.1, 30.0}, {79.0, 31.6}, {73.1, 46.0}, {68.9, 46.0}, {63.0, 31.6}, {68.9, 30.0}];
+        list<list<point>> room_routes <- [
+            [{73.1, 31.6}, lobby_center_pt, stair_door_pt],
+            [{78.0, 31.6}, {73.0, 31.6}, lobby_center_pt, stair_door_pt],
+            [{73.1, 44.4}, lobby_center_pt, stair_door_pt],
+            [{68.9, 44.4}, lobby_center_pt, stair_door_pt],
+            [{64.0, 31.6}, {69.0, 31.6}, lobby_center_pt, stair_door_pt],
+            [{68.9, 31.6}, lobby_center_pt, stair_door_pt]
+        ];
 
         loop f from: min_f to: max_f {
             loop idx from: 0 to: 5 {
                 string fcode   <- room_codes[idx];
                 string room_id <- "Floor_" + f + "_" + fcode;
 
-                // RANDOM SỐ LƯỢNG NGƯỜI TRONG CĂN PHÒNG (Phân phối Poisson trung bình λ = 2.5)
+                // Số người mỗi căn theo phân phối rời rạc có trọng số, trung bình 2.5
                 int num_people <- rnd_choice([1::0.20, 2::0.35, 3::0.25, 4::0.15, 5::0.05]);
 
                 point f_door <- room_doors[idx];
-                float rx1    <- room_min_x[idx];
-                float rx2    <- room_max_x[idx];
-                float ry1    <- room_min_y[idx];
-                float ry2    <- room_max_y[idx];
+                bool is_middle <- (idx = 1 or idx = 4);
+                bool mirror_x  <- (idx = 3 or idx = 4 or idx = 5);
+                bool mirror_y  <- (idx = 2 or idx = 3);
 
                 loop i from: 1 to: num_people {
+                    int room_kind <- is_middle ? rnd_choice([0, 1, 2, 3]) : rnd_choice([0, 1, 2, 3, 4]);
+                    float lx1 <- 0.0; float lx2 <- 0.0;
+                    float ly1 <- 0.0; float ly2 <- 0.0;
+                    list<point> local_route <- [];
+
+                    if (is_middle) {
+                        if (room_kind = 0) { // Sảnh trong căn
+                            lx1 <- 15.5; lx2 <- 16.8; ly1 <- 8.2; ly2 <- 10.0;
+                        } else if (room_kind = 1) { // Phòng khách
+                            lx1 <- 18.3; lx2 <- 20.5; ly1 <- 8.0; ly2 <- 9.5;
+                            local_route <- [{17.5, 8.7}, {16.0, 8.7}, {16.0, 7.8}];
+                        } else if (room_kind = 2) { // Bếp
+                            lx1 <- 18.3; lx2 <- 20.5; ly1 <- 11.0; ly2 <- 11.9;
+                            local_route <- [{17.5, 11.5}, {16.0, 11.5}, {16.0, 7.8}];
+                        } else { // Phòng ngủ
+                            lx1 <- 18.5; lx2 <- 20.5; ly1 <- 13.2; ly2 <- 14.3;
+                            local_route <- [{17.5, 13.6}, {16.8, 13.6}, {16.8, 11.5}, {16.0, 11.5}, {16.0, 7.8}];
+                        }
+                    } else {
+                        if (room_kind = 0) { // Sảnh trong căn
+                            lx1 <- 11.4; lx2 <- 13.0; ly1 <- 5.0; ly2 <- 6.4;
+                        } else if (room_kind = 1) { // Phòng khách
+                            lx1 <- 18.0; lx2 <- 20.4; ly1 <- 2.0; ly2 <- 3.0;
+                            local_route <- [{17.0, 4.0}, {12.1, 4.0}, {12.1, 5.7}];
+                        } else if (room_kind = 2) { // Bếp
+                            lx1 <- 18.0; lx2 <- 20.6; ly1 <- 5.0; ly2 <- 6.0;
+                            local_route <- [{17.0, 5.3}, {17.0, 4.0}, {12.1, 4.0}, {12.1, 5.7}];
+                        } else if (room_kind = 3) { // Phòng ngủ 1
+                            lx1 <- 11.5; lx2 <- 13.0; ly1 <- 1.0; ly2 <- 2.6;
+                            local_route <- [{12.2, 3.4}, {12.2, 5.7}];
+                        } else { // Phòng ngủ 2
+                            lx1 <- 14.0; lx2 <- 15.8; ly1 <- 1.0; ly2 <- 2.6;
+                            local_route <- [{14.75, 3.4}, {14.75, 4.0}, {12.1, 4.0}, {12.1, 5.7}];
+                        }
+                    }
+
+                    point local_spawn <- {lx1 + rnd(lx2 - lx1), ly1 + rnd(ly2 - ly1)};
+                    point world_spawn <- {to_px(sym_x(local_spawn.x, mirror_x)), to_py(sym_y(local_spawn.y, mirror_y))};
+                    list<point> world_route <- [];
+                    loop waypoint over: local_route {
+                        world_route <- world_route + [{to_px(sym_x(waypoint.x, mirror_x)), to_py(sym_y(waypoint.y, mirror_y))}];
+                    }
+
                     create occupant {
                         agent_id          <- room_id + "_p" + i;
                         home_floor        <- f;
                         current_floor     <- f;
                         current_flat_code <- fcode;
                         flat_door_loc     <- f_door;
+                        room_route        <- world_route;
+                        egress_route      <- room_routes[idx] + [];
 
-                        // Rải vị trí ngẫu nhiên bên trong căn phòng
-                        location <- {rx1 + rnd(rx2 - rx1), ry1 + rnd(ry2 - ry1)};
+                        // Sinh ngẫu nhiên trong một phòng, rồi đi qua cửa nội bộ của phòng đó.
+                        location <- world_spawn;
                         target_waypoint <- location;
                     }
                 }
@@ -194,6 +248,21 @@ global {
         do update_population_statistics;
     }
 
+    // Sự kiện báo động chung, tính từ lúc người dùng đặt điểm cháy.
+    reflex activate_building_alarm when: fire_started and !building_alarm_active and sim_ticks * step >= 25.0 {
+        building_alarm_active <- true;
+        write "[Alarm] Chuông báo động tòa nhà đã kích hoạt.";
+    }
+
+    reflex update_floor_smoke_for_people when: fire_started and (cycle mod 4 = 0) {
+        float floor_area_cells <- max([1.0, float(length(floor_interior_cells))]);
+        ask floor_level_agt {
+            int smoky_count <- (floor_id = selected_floor) ? length(active_smoky_cells) : length(floor_smoky_cells);
+            float smoke_coverage <- min([1.0, (float(smoky_count) / floor_area_cells) * 4.0]);
+            floor_smoke_density <- max([floor_smoke_density * 0.98, smoke_coverage]);
+        }
+    }
+
     action update_population_statistics {
         stay_put_count     <- length(occupant where (each.behavior_state = "stay_in_flat"));
         preparing_count    <- length(occupant where (each.behavior_state = "preparing_evacuation"));
@@ -207,6 +276,7 @@ global {
 // CỬA BUỒNG THANG THOÁT HIỂM: HÀNG ĐỢI FIFO GIỚI HẠN LƯU LƯỢNG SFPE (0.55 người/s)
 // =============================================================================
 species stair_door {
+    int floor_id;
     float door_width       <- 0.8;
     float effective_width  <- 0.5;   // W_eff = 0.8 - 2 * 0.15 = 0.5m
     float specific_flow    <- 1.1;   // F_s = 1.1 người/m/giây
@@ -225,6 +295,7 @@ species stair_door {
                     self.can_pass_door   <- true;
                     self.behavior_state  <- "evacuating";
                     self.target_waypoint <- inside_stair_pt;
+                    self.location        <- inside_stair_pt;
                 }
                 last_passage_time <- time;
             }
@@ -233,10 +304,12 @@ species stair_door {
     }
 
     aspect default {
-        draw rectangle(0.8, 1.4) at: location color: rgb(180, 40, 40) border: #black;
-        if (!empty(waiting_queue)) {
-            draw string(length(waiting_queue)) at: {location.x - 0.4, location.y - 1.2}
-                color: #red font: font("Arial", 11, #bold);
+        if (floor_id = selected_floor) {
+            draw rectangle(0.8, 1.4) at: location color: rgb(180, 40, 40) border: #black;
+            if (!empty(waiting_queue)) {
+                draw string(length(waiting_queue)) at: {location.x - 0.4, location.y - 1.2}
+                    color: #red font: font("Arial", 11, #bold);
+            }
         }
     }
 }
@@ -254,6 +327,8 @@ species occupant skills: [moving] {
     string current_flat_code;
     point  flat_door_loc;
     point  target_waypoint;
+    list<point> room_route <- [];
+    list<point> egress_route <- [];
 
     // -------------------------------------------------------------------------
     // 2. PROPERTIES: THỂ CHẤT & VẬN ĐỘNG (MONTE CARLO)
@@ -355,14 +430,7 @@ species occupant skills: [moving] {
             }
         }
 
-        // Đọc trực tiếp từ ô lưới nếu đang xem tầng này
-        if (current_floor = selected_floor) {
-            grid_cell c <- grid_cell(location);
-            if (c != nil) {
-                if (c.smoky)   { env_smoke <- max([env_smoke, c.smoke_density]); }
-                if (c.burning) { env_temp  <- max([env_temp, 160.0]); see_fire <- true; }
-            }
-        }
+        // Mỗi người dùng trạng thái tầng của mình, không phụ thuộc tầng người xem đang chọn.
 
         // Mức hoảng sợ tăng khi thấy lửa, nhiễm khói hoặc bị kẹt
         float p_fire  <- see_fire ? 0.75 : 0.0;
@@ -397,8 +465,9 @@ species occupant skills: [moving] {
             panic_level      <- 0.0;
             casualties_count <- casualties_count + 1;
 
-            if (building_stair_door != nil and (building_stair_door.waiting_queue contains self)) {
-                remove self from: building_stair_door.waiting_queue;
+            stair_door my_door <- stair_doors contains_key current_floor ? stair_doors[current_floor] : nil;
+            if (my_door != nil and (my_door.waiting_queue contains self)) {
+                remove self from: my_door.waiting_queue;
             }
         }
     }
@@ -427,23 +496,37 @@ species occupant skills: [moving] {
             }
         }
 
-        // 2. Ô phòng mình đứng có khói hoặc lửa
-        if (current_floor = selected_floor) {
-            grid_cell c <- grid_cell(location);
-            if (c != nil and (c.smoky or c.burning)) {
-                hazard_detected <- true;
-                pre_evacuation_delay <- min([pre_evacuation_delay, 30.0]);
-            }
+        // 2. Dữ liệu nguy hiểm từ tầng của chính tác tử
+        floor_level_agt own_floor <- floor_map contains_key current_floor ? floor_map[current_floor] : nil;
+        if (own_floor != nil and own_floor.floor_smoke_density > 0.15) {
+            hazard_detected <- true;
+            pre_evacuation_delay <- min([pre_evacuation_delay, 30.0]);
         }
 
-        // 3. Chuông báo động hoặc tiếng ồn sơ tán (sau 25s kể từ khi phát hỏa cho các tầng dưới 0, 1, 2, 3)
-        if (fire_started and current_floor <= 3 and time > 25.0) {
+        // Ghi nhận người tự phát hiện nguy hiểm trước khi xét tín hiệu báo động chung.
+        bool direct_hazard <- hazard_detected;
+
+        // 3. Nghe chuông báo động của tòa nhà.
+        if (building_alarm_active) {
             hazard_detected <- true;
         }
 
         if (hazard_detected) {
             behavior_state  <- "preparing_evacuation";
             target_waypoint <- flat_door_loc;
+
+            // Người tự phát hiện cháy hô báo một lần cho người còn ở yên trong cùng căn.
+            if (direct_hazard and !building_alarm_active) {
+                int source_floor <- current_floor;
+                string source_flat <- current_flat_code;
+                list<occupant> flatmates <- occupant where (
+                    each.home_floor = source_floor and each.current_flat_code = source_flat
+                    and each.behavior_state = "stay_in_flat" and !each.is_incapacitated);
+                ask flatmates {
+                    behavior_state  <- "preparing_evacuation";
+                    target_waypoint <- flat_door_loc;
+                }
+            }
         }
     }
 
@@ -453,18 +536,9 @@ species occupant skills: [moving] {
     reflex prepare_and_delay when: behavior_state = "preparing_evacuation" and !is_incapacitated {
         delay_timer <- delay_timer + step;
 
-        // Di chuyển gom về phía cửa chính căn phòng
-        if (self distance_to flat_door_loc > 1.0) {
-            do goto target: flat_door_loc speed: base_speed * 0.7;
-        }
-
         if (delay_timer >= pre_evacuation_delay) {
             behavior_state  <- "evacuating";
-            if (current_floor = 0) {
-                target_waypoint <- ground_exit_pt;
-            } else {
-                target_waypoint <- lobby_center_pt;
-            }
+            target_waypoint <- flat_door_loc;
         }
     }
 
@@ -472,7 +546,16 @@ species occupant skills: [moving] {
     // HÀNH VI 4: BƯỚC RA SẢNH & DÒ DẪM ĐẾN CỬA BUỒNG THANG
     // -------------------------------------------------------------------------
     reflex exit_room_to_lobby when: behavior_state = "evacuating" and !flat_door_exited and !is_incapacitated {
-        do goto target: flat_door_loc speed: base_speed;
+        if (!empty(room_route)) {
+            point next_room_pt <- first(room_route);
+            do goto target: next_room_pt speed: base_speed * 2.0;
+            if (self distance_to next_room_pt <= 0.5) {
+                remove next_room_pt from: room_route;
+            }
+            return;
+        }
+
+        do goto target: flat_door_loc speed: base_speed * 2.0;
 
         if (self distance_to flat_door_loc <= 1.0) {
             flat_door_exited <- true;
@@ -484,11 +567,7 @@ species occupant skills: [moving] {
                     fl_agt.floor_smoke_density <- min([1.0, fl_agt.floor_smoke_density + 0.15]);
                 }
             }
-            if (current_floor = 0) {
-                target_waypoint <- ground_exit_pt;
-            } else {
-                target_waypoint <- stair_door_pt;
-            }
+            target_waypoint <- empty(egress_route) ? (current_floor = 0 ? ground_exit_pt : stair_door_pt) : first(egress_route);
         }
     }
 
@@ -501,27 +580,27 @@ species occupant skills: [moving] {
         }
         current_speed <- base_speed * spd_factor;
 
-        if (current_floor = 0) {
-            // Tầng trệt: chạy thẳng ra cửa chính CỬA CHÍNH thoát hiểm ngoài trời
-            do goto target: ground_exit_pt speed: current_speed;
-            if (self distance_to ground_exit_pt <= 1.8) {
+        // Đi qua các điểm mốc của căn hộ/sảnh trước khi đến cửa thoát.
+        if (!empty(egress_route)) {
+            point next_pt <- first(egress_route);
+            do goto target: next_pt speed: current_speed * 2.0;
+            if (self distance_to next_pt <= 0.5) {
+                remove next_pt from: egress_route;
+            }
+        } else if (current_floor = 0) {
+            if (self distance_to ground_exit_pt <= 0.5) {
                 behavior_state  <- "evacuated";
                 evacuated_count <- evacuated_count + 1;
                 location        <- {-100.0, -100.0};
             }
         } else {
-            // Tầng trên: di chuyển tới cửa buồng thang bộ
-            do goto target: stair_door_pt speed: current_speed;
-
-            // Đến gần cửa thang -> xếp hàng vào FIFO queue
-            if (self distance_to stair_door_pt <= 1.2) {
-                if (building_stair_door != nil) {
-                    if (!(building_stair_door.waiting_queue contains self)) {
-                        add self to: building_stair_door.waiting_queue;
-                    }
-                    behavior_state <- "waiting_at_door";
-                    current_speed  <- 0.0;
+            stair_door my_door <- stair_doors contains_key current_floor ? stair_doors[current_floor] : nil;
+            if (my_door != nil and self distance_to stair_door_pt <= 0.5) {
+                if (!(my_door.waiting_queue contains self)) {
+                    add self to: my_door.waiting_queue;
                 }
+                behavior_state <- "waiting_at_door";
+                current_speed  <- 0.0;
             }
         }
     }
@@ -537,9 +616,6 @@ species occupant skills: [moving] {
         float stair_temp <- 25.0;
         if (fl_below != nil) {
             stair_temp <- 25.0 + (fl_below.floor_smoke_density * 65.0);
-            if (fl_below.floor_id >= 6 and fl_below.floor_id <= 16 and fire_started and time > 300.0) {
-                stair_temp <- max([stair_temp, 62.0]);
-            }
         }
 
         // Quay đầu leo ngược lên tầng cao nếu nhiệt độ vượt ngưỡng chịu đựng
@@ -551,8 +627,8 @@ species occupant skills: [moving] {
 
         stair_step_ticks <- stair_step_ticks + 1;
 
-        // Mô phỏng nhịp bước chuyển tầng (~2.0 giây/tầng: 4 ticks x 0.5s)
-        if (stair_step_ticks >= 4) {
+        // Quãng đường thang quy ước 6 m/tầng; tốc độ riêng của tác tử quyết định thời gian.
+        if (stair_step_ticks * step * stair_speed >= 6.0) {
             stair_step_ticks <- 0;
 
             if (behavior_state = "evacuating") {
@@ -560,25 +636,20 @@ species occupant skills: [moving] {
                 if (current_floor <= 0) {
                     current_floor   <- 0;
                     target_waypoint <- ground_exit_pt;
+                    can_pass_door   <- false;
+                    egress_route    <- [lobby_center_pt, ground_exit_pt];
                 }
             } else if (behavior_state = "retreating_upward") {
                 if (current_floor < 23) {
                     current_floor <- current_floor + 1;
                 } else {
-                    current_speed <- 0.0; // Mắc kẹt tại tầng 23
+                    current_speed  <- 0.0; // Mắc kẹt tại tầng 23
+                    can_pass_door  <- false;
                 }
             }
         }
 
-        // Đến tầng trệt và thoát ra ngoài an toàn
-        if (current_floor = 0) {
-            do goto target: ground_exit_pt speed: base_speed;
-            if (self distance_to ground_exit_pt <= 1.8) {
-                behavior_state  <- "evacuated";
-                evacuated_count <- evacuated_count + 1;
-                location        <- {-100.0, -100.0};
-            }
-        }
+        // Sau khi đến tầng trệt, navigate_lobby_to_stair dẫn qua sảnh ra ngoài.
     }
 
     // =========================================================================

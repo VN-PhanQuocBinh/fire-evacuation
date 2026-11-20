@@ -93,7 +93,7 @@ global {
 // =============================================================================
 experiment Grenfell_Modular_Simulation type: gui {
     parameter "Giới hạn số tầng mô phỏng" var: test_max_floor category: "Cấu hình Tòa Nhà" min: 4 max: 24 step: 1;
-    parameter "Mô phỏng Dân số Toàn tháp (~290 người)" var: full_tower_population category: "Cấu hình Sơ Tán";
+    parameter "Mô phỏng Dân số Toàn tháp" var: full_tower_population category: "Cấu hình Sơ Tán";
 
     action handle_click {
         ask simulation { do handle_click; }
@@ -193,17 +193,13 @@ experiment Grenfell_Modular_Simulation type: gui {
                     + "THƯƠNG VONG: " + casualties_count;
                 draw pop_str at: {49.0, 67.4} color: rgb(15,30,80) font: font("Arial",8,#bold);
 
-                // Dòng 4: Đối chiếu Số liệu Thực tế Grenfell Inquiry
-                string bench_str <- "📊 THỰC TẾ GRENFELL: <01:30 (112 thoát) | 01:30-01:36 (36 thoát) | 01:40-01:50 (20 thoát) | >01:50 (Cầu thang cắt đứt, kẹt tầng 20-23)";
-                draw bench_str at: {49.0, 69.2} color: rgb(90,40,110) font: font("Arial",7,#italic);
-
-                // Dòng 5: Chú giải Trực quan (Legend)
+                // Dòng 4: Chú giải Trực quan (Legend)
                 string leg_str <- "🎨 CHÚ GIẢI: Lõi Sức khỏe (🟢 Khỏe >85% | 🟡 Nhẹ >60% | 🟠 Độc >30% | 🔴 Nguy kịch | ⚫ Chết [X]) | Vòng Hào quang 🟣 Tím Neon: Hoảng loạn quay đầu | Viền đôi: Người già";
-                draw leg_str at: {49.0, 70.9} color: rgb(50,70,95) font: font("Arial",7,#plain);
+                draw leg_str at: {49.0, 69.2} color: rgb(50,70,95) font: font("Arial",7,#plain);
 
-                // Dòng 6: Hướng dẫn người dùng
+                // Dòng 5: Hướng dẫn người dùng
                 draw "HƯỚNG DẪN: Click TRÁI cột Mặt đứng bên trái để chuyển tầng | Click chuột vào mặt bằng để đặt mồi lửa"
-                    at: {49.0, 72.6} color: rgb(80,90,110) font: font("Arial",7,#plain);
+                    at: {49.0, 70.9} color: rgb(80,90,110) font: font("Arial",7,#plain);
             }
         }
     }
