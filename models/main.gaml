@@ -152,56 +152,51 @@ experiment Grenfell_Modular_Simulation type: gui {
                 }
             }
 
-            // 8. HUD trạng thái, Tiến trình lan truyền & Thống kê Sơ tán
             graphics "HUD_Status" {
                 floor_level_agt cur_fl <- floor_map contains_key selected_floor ? floor_map[selected_floor] : nil;
-                
-                string phase_str <- (fire_phase = 0) ? "CHƯA BẮT ĐẦU (Click chuột vào sàn để đặt điểm cháy)" :
-                    ((!cladding_ignited) ? "GIAI ĐOẠN 1: Lửa đang lan trong phòng (Chờ lan tới cửa sổ để bứt phá Cladding mặt ngoài...)" :
-                    ((!crown_reached) ? ("GIAI ĐOẠN 2: Lửa Cladding mặt Đông đang bốc lên TẦNG " + highest_east_floor + "/" + test_max_floor) :
-                    ("GIAI ĐOẠN 3: Lan đỉnh Crown -> Chữ V ngược xuống mặt Bắc/Nam (Tầng " + v_lowest_floor + ") & mặt Tây")));
-
-                string clad_status <- (cur_fl = nil) ? "" :
-                    (" | Cladding Tầng " + selected_floor_name + ": "
-                    + "Đông: " + ((cur_fl.clad_east > 1.5) ? "Than đen" : ((cur_fl.clad_east > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Bắc: " + ((cur_fl.clad_north > 1.5) ? "Than đen" : ((cur_fl.clad_north > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Than đen" : ((cur_fl.clad_south > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Than đen" : ((cur_fl.clad_west > 0.1) ? "CHÁY RỰC" : "An toàn")));
-
+                string phase_str <- (fire_phase = 0) ? "Chưa bắt đầu" :
+                    ((!cladding_ignited) ? "Lửa lan trong phòng" :
+                    ((!crown_reached) ? ("Cladding mặt Đông: tầng " + highest_east_floor + "/" + test_max_floor) :
+                    ("Lửa lan xuống từ đỉnh: tầng " + v_lowest_floor)));
                 bool stair_smoky <- !empty(active_smoky_cells where (each.is_stairwell));
+                string clad_status <- (cur_fl = nil) ? "" :
+                    ("Đông: " + ((cur_fl.clad_east > 1.5) ? "Cháy hết" : ((cur_fl.clad_east > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Bắc: " + ((cur_fl.clad_north > 1.5) ? "Cháy hết" : ((cur_fl.clad_north > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Cháy hết" : ((cur_fl.clad_south > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Cháy hết" : ((cur_fl.clad_west > 0.1) ? "Đang cháy" : "Chưa cháy")));
 
-                // Dòng 1: Tiến trình lan truyền Sequence
-                draw "TIẾN TRÌNH LỬA: " + phase_str
-                    at: {49.0, 61.8} color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",9,#bold);
-
-                // Dòng 2: Trạng thái tầng đang xem & Buồng thang bộ
-                draw "TẦNG " + selected_floor_name + clad_status
-                    at: {49.0, 63.8} color: rgb(20,35,75) font: font("Arial",8,#bold);
-
-                draw (stair_smoky ? "⚠️ THANG BỘ: NHIỄM KHÓI ĐỘC (NGUY HIỂM) | CỬA SỔ: " + ((cur_fl != nil and cur_fl.window_broken) ? "VỠ / TÁP LỬA NỘI THẤT" : "BÌNH THƯỜNG") :
-                                   "✅ THANG BỘ: THÔNG THOÁNG / AN TOÀN (Khói chưa lan tới sảnh)")
-                    at: {49.0, 65.6} color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",8,#bold);
-
-                // Dòng 3: Thống kê Dân cư Sơ tán Thời gian thực
-                string pop_str <- "👥 DÂN CƯ SƠ TÁN (" + total_occupants_count + " người): "
-                    + "Ở yên: " + stay_put_count + " | "
-                    + "Chuẩn bị: " + preparing_count + " | "
-                    + "Đang chạy: " + evacuating_count + " | "
-                    + "Chờ cửa thang: " + waiting_door_count + " | "
-                    + "Quay đầu lên cao: " + retreating_count + " | "
-                    + "ĐÃ THOÁT: " + evacuated_count + " | "
-                    + "THƯƠNG VONG: " + casualties_count;
-                draw pop_str at: {49.0, 67.4} color: rgb(15,30,80) font: font("Arial",8,#bold);
-
-                // Dòng 4: Chú giải Trực quan (Legend)
-                string leg_str <- "🎨 CHÚ GIẢI: Lõi Sức khỏe (🟢 Khỏe >85% | 🟡 Nhẹ >60% | 🟠 Độc >30% | 🔴 Nguy kịch | ⚫ Chết [X]) | Vòng Hào quang 🟣 Tím Neon: Hoảng loạn quay đầu | Viền đôi: Người già";
-                draw leg_str at: {49.0, 69.2} color: rgb(50,70,95) font: font("Arial",7,#plain);
-
-                // Dòng 5: Hướng dẫn người dùng
-                draw "HƯỚNG DẪN: Click TRÁI cột Mặt đứng bên trái để chuyển tầng | Click chuột vào mặt bằng để đặt mồi lửa"
-                    at: {49.0, 70.9} color: rgb(80,90,110) font: font("Arial",7,#plain);
+                draw "TIẾN TRÌNH LỬA: " + phase_str at: {49.0, 61.8}
+                    color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",9,#bold);
+                draw ("CLADDING " + selected_floor_name + ": " + clad_status) at: {49.0, 63.8}
+                    color: rgb(20,35,75) font: font("Arial",8,#bold);
+                draw (stair_smoky ? "THANG BỘ: CÓ KHÓI" : "THANG BỘ: CHƯA CÓ KHÓI") at: {49.0, 65.6}
+                    color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",8,#bold);
+                draw "SỨC KHỎE: Xanh >85% | Vàng >60% | Cam >30% | Đỏ ≤30% | X: mất khả năng di chuyển"
+                    at: {49.0, 67.4} color: rgb(50,70,95) font: font("Arial",8,#plain);
+                draw "Vòng tím: hoảng loạn | Viền đôi: người già | Click mặt đứng: chọn tầng | Click mặt bằng: đặt lửa"
+                    at: {49.0, 69.2} color: rgb(50,70,95) font: font("Arial",8,#plain);
             }
+
         }
+        
+        // Count states directly so charts do not lag behind the HUD's periodic statistics.
+            display "Hanh_vi_so_tan" {
+                chart "Trang thai hanh vi theo chu ky" type: series {
+                    data "Chua phan ung" value: length(occupant where (each.behavior_state = "stay_in_flat")) color: #gray;
+                    data "Dang chuan bi" value: length(occupant where (each.behavior_state = "preparing_evacuation")) color: #orange;
+                    data "Dang di chuyen" value: length(occupant where (each.behavior_state = "evacuating" or each.behavior_state = "retreating_upward")) color: #blue;
+                    data "Dang cho" value: length(occupant where (each.behavior_state = "waiting_at_door")) color: #yellow;
+                    data "Tru an" value: length(occupant where (each.behavior_state = "sheltering")) color: #magenta;
+                }
+            }
+
+            display "Ket_qua_so_tan" {
+                chart "Ket qua so tan theo chu ky" type: series {
+                    data "Da thoat" value: length(occupant where (each.behavior_state = "evacuated")) color: #green;
+                    data "Con trong toa" value: length(occupant where (each.behavior_state != "evacuated")) color: #blue;
+                    data "Mat kha nang di chuyen" value: length(occupant where (each.is_incapacitated)) color: #red;
+                }
+            }
     }
 }
 
