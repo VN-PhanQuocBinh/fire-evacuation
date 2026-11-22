@@ -1,0 +1,11 @@
+# Repository metadata
+.git/
+
+# GAMA / Eclipse workspace state
+.metadata/
+.gama_ws/
+
+# Generated output and editor state
+bin/
+.vscode/
+.idea/

@@ -19,9 +19,11 @@ import "includes/4_people_evacuation.gaml"
 global {
     // Kích thước môi trường toàn cục cố định (100m × 75m)
     geometry shape <- rectangle(100.0, 75.0) at_location {50.0, 37.5};
+    bool is_test_mode <- false;
 
     init {
         write "=== KHỞI TẠO MÔ HÌNH GRENFELL TOWER (MODULAR DUAL-LAYER) ===";
+        v_lowest_floor <- test_max_floor;
 
         // 1. Dựng bản vẽ kiến trúc (mặt đứng bên trái + mặt bằng bên phải)
         do build_tower_elevation;
@@ -62,11 +64,23 @@ global {
         point pt <- #user_location;
 
         if (pt.x >= 4.0 and pt.x <= 44.0) {
+            int prev_floor <- selected_floor;
+            // 1. Lưu snapshot trạng thái lửa/khói của tầng hiện tại
+            do save_current_floor_state;
+
+            // 2. Chuyển tầng (chỉ vẽ lại vector nếu đổi giữa Tầng Trệt và Tầng Điển Hình)
             do select_floor;
-            // Tái tạo mặt bằng tầng mới và rasterize grid
-            do rasterize_floor_plan;
-            // Đồng bộ trạng thái mồi lửa/khói của tầng vừa chọn
-            do sync_active_floor_fire;
+
+            bool prev_is_ground <- (prev_floor = 0);
+            bool curr_is_ground <- (selected_floor = 0);
+            if (prev_is_ground != curr_is_ground) {
+                do rasterize_floor_plan;
+            }
+
+            // 3. Phục hồi trạng thái lửa/khói riêng biệt của tầng mới chọn tức thời (0 delay)
+            if (selected_floor != prev_floor) {
+                do restore_active_floor_state;
+            }
         } else if (pt.x >= 49.0 and pt.x <= 93.0 and pt.y >= 16.0 and pt.y <= 60.0) {
             // Click chọn điểm phát hỏa chính xác theo tọa độ chuột
             do place_fire_at_click;
@@ -78,6 +92,8 @@ global {
 // EXPERIMENT CHÍNH
 // =============================================================================
 experiment Grenfell_Modular_Simulation type: gui {
+    parameter "Giới hạn số tầng mô phỏng" var: test_max_floor category: "Cấu hình Tòa Nhà" min: 4 max: 24 step: 1;
+    parameter "Mô phỏng Dân số Toàn tháp" var: full_tower_population category: "Cấu hình Sơ Tán";
 
     action handle_click {
         ask simulation { do handle_click; }
@@ -97,10 +113,16 @@ experiment Grenfell_Modular_Simulation type: gui {
             species plan_element;
             species plan_label;
 
-            // 4. Lớp Lửa & Khói (Grid Cell): chỉ hiển thị ô có lửa hoặc khói
+            // 4. Lớp Lửa & Khói
             species grid_cell aspect: default;
 
-            // 5. Trang trí La bàn & Khung nét đứt Limit of the model
+            // 5. Cửa buồng thang thoát hiểm SFPE (FIFO Bottleneck)
+            species stair_door;
+
+            // 6. Quần thể Cư dân (Tác tử người Occupant với hiển thị 2 chiều Sức khỏe - Hoảng sợ)
+            species occupant aspect: default;
+
+            // 7. Trang trí La bàn & Khung nét đứt Limit of the model
             graphics "Decorations" {
                 float px1 <- 49.0; float px2 <- 93.0;
                 float py1 <- 16.0; float py2 <- 60.0;
@@ -117,53 +139,64 @@ experiment Grenfell_Modular_Simulation type: gui {
                     float l_y2 <- py1 + (14.8 * 2.0);
                     loop i from: 0 to: 9 {
                         float bx <- l_x1 + (i * 1.5);
-                        draw line([{bx, l_y1},{bx + 0.9, l_y1}]) color: #white;
-                        draw line([{bx, l_y2},{bx + 0.9, l_y2}]) color: #white;
+                        draw line([{bx, l_y1},{bx + 0.9, l_y1}]) color: rgb(210,40,40);
+                        draw line([{bx, l_y2},{bx + 0.9, l_y2}]) color: rgb(210,40,40);
                     }
                     loop j from: 0 to: 18 {
                         float by <- l_y1 + (j * 1.5);
-                        draw line([{l_x1, by},{l_x1, by + 0.9}]) color: #white;
-                        draw line([{l_x2, by},{l_x2, by + 0.9}]) color: #white;
+                        draw line([{l_x1, by},{l_x1, by + 0.9}]) color: rgb(210,40,40);
+                        draw line([{l_x2, by},{l_x2, by + 0.9}]) color: rgb(210,40,40);
                     }
                     draw "Limit of the model" at: {l_x2 + 1.2, l_y2}
                         color: rgb(210,40,40) font: font("Arial",10,#bold);
                 }
             }
 
-            // 6. HUD trạng thái & Tiến trình lan truyền
             graphics "HUD_Status" {
-                floor_level_agt cur_fl <- first(floor_level_agt where (each.floor_id = selected_floor));
-                
-                string phase_str <- (fire_phase = 0) ? "CHƯA BẮT ĐẦU (Click chuột vào sàn để đặt điểm cháy)" :
-                    ((!cladding_ignited) ? "GIAI ĐOẠN 1: Lửa đang lan trong phòng (Chờ lan tới cửa sổ để bứt phá Cladding mặt ngoài...)" :
-                    ((!crown_reached) ? ("GIAI ĐOẠN 2: Lửa Cladding mặt Đông đang bốc lên TẦNG " + highest_east_floor + "/24") :
-                    ("GIAI ĐOẠN 3: Lan đỉnh Crown -> Chữ V ngược xuống mặt Bắc/Nam (Tầng " + v_lowest_floor + ") & mặt Tây")));
-
+                floor_level_agt cur_fl <- floor_map contains_key selected_floor ? floor_map[selected_floor] : nil;
+                string phase_str <- (fire_phase = 0) ? "Chưa bắt đầu" :
+                    ((!cladding_ignited) ? "Lửa lan trong phòng" :
+                    ((!crown_reached) ? ("Cladding mặt Đông: tầng " + highest_east_floor + "/" + test_max_floor) :
+                    ("Lửa lan xuống từ đỉnh: tầng " + v_lowest_floor)));
+                bool stair_smoky <- !empty(active_smoky_cells where (each.is_stairwell));
                 string clad_status <- (cur_fl = nil) ? "" :
-                    (" | Cladding Tầng " + selected_floor_name + ": "
-                    + "Đông: " + ((cur_fl.clad_east > 1.5) ? "Than đen" : ((cur_fl.clad_east > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Bắc: " + ((cur_fl.clad_north > 1.5) ? "Than đen" : ((cur_fl.clad_north > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Than đen" : ((cur_fl.clad_south > 0.1) ? "CHÁY RỰC" : "An toàn"))
-                    + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Than đen" : ((cur_fl.clad_west > 0.1) ? "CHÁY RỰC" : "An toàn")));
+                    ("Đông: " + ((cur_fl.clad_east > 1.5) ? "Cháy hết" : ((cur_fl.clad_east > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Bắc: " + ((cur_fl.clad_north > 1.5) ? "Cháy hết" : ((cur_fl.clad_north > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Nam: " + ((cur_fl.clad_south > 1.5) ? "Cháy hết" : ((cur_fl.clad_south > 0.1) ? "Đang cháy" : "Chưa cháy"))
+                    + " | Tây: " + ((cur_fl.clad_west > 1.5) ? "Cháy hết" : ((cur_fl.clad_west > 0.1) ? "Đang cháy" : "Chưa cháy")));
 
-                bool stair_smoky <- (cur_fl != nil and cur_fl.interior_smoke_depth >= 18.0);
-
-                // Dòng 1: Tiến trình lan truyền Sequence
-                draw "TIẾN TRÌNH: " + phase_str
-                    at: {49.0, 63.8} color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",10,#bold);
-
-                // Dòng 2: Trạng thái tầng đang xem & Buồng thang bộ
-                draw "TẦNG " + selected_floor_name + clad_status
-                    at: {49.0, 66.5} color: rgb(20,35,75) font: font("Arial",9,#bold);
-
-                draw (stair_smoky ? "⚠️ THANG BỘ: NHIỄM KHÓI ĐỘC (NGUY HIỂM) | CỬA SỔ: " + ((cur_fl.window_broken) ? "VỠ / TÁP LỬA NỘI THẤT" : "BÌNH THƯỜNG") :
-                                   "✅ THANG BỘ: THÔNG THOÁNG / AN TOÀN (Khói chưa lan tới sảnh)")
-                    at: {49.0, 69.0} color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",9,#bold);
-
-                // Dòng 3: Hướng dẫn người dùng
-                draw "HƯỚNG DẪN: Click TRÁI vào cột Mặt đứng bên trái để chuyển tầng | Click chuột vào bất kỳ đâu trên mặt bằng để đặt mồi lửa"
-                    at: {49.0, 71.5} color: rgb(50,60,80) font: font("Arial",8,#plain);
+                draw "TIẾN TRÌNH LỬA: " + phase_str at: {49.0, 61.8}
+                    color: (fire_started ? rgb(220,30,30) : rgb(30,120,40)) font: font("Arial",9,#bold);
+                draw ("CLADDING " + selected_floor_name + ": " + clad_status) at: {49.0, 63.8}
+                    color: rgb(20,35,75) font: font("Arial",8,#bold);
+                draw (stair_smoky ? "THANG BỘ: CÓ KHÓI" : "THANG BỘ: CHƯA CÓ KHÓI") at: {49.0, 65.6}
+                    color: (stair_smoky ? rgb(200,30,0) : rgb(0,130,50)) font: font("Arial",8,#bold);
+                draw "SỨC KHỎE: Xanh >85% | Vàng >60% | Cam >30% | Đỏ ≤30% | X: mất khả năng di chuyển"
+                    at: {49.0, 67.4} color: rgb(50,70,95) font: font("Arial",8,#plain);
+                draw "Vòng tím: hoảng loạn | Viền đôi: người già | Click mặt đứng: chọn tầng | Click mặt bằng: đặt lửa"
+                    at: {49.0, 69.2} color: rgb(50,70,95) font: font("Arial",8,#plain);
             }
+
         }
+        
+        // Count states directly so charts do not lag behind the HUD's periodic statistics.
+            display "Hanh_vi_so_tan" {
+                chart "Trang thai hanh vi theo chu ky" type: series {
+                    data "Chua phan ung" value: length(occupant where (each.behavior_state = "stay_in_flat")) color: #gray;
+                    data "Dang chuan bi" value: length(occupant where (each.behavior_state = "preparing_evacuation")) color: #orange;
+                    data "Dang di chuyen" value: length(occupant where (each.behavior_state = "evacuating" or each.behavior_state = "retreating_upward")) color: #blue;
+                    data "Dang cho" value: length(occupant where (each.behavior_state = "waiting_at_door")) color: #yellow;
+                    data "Tru an" value: length(occupant where (each.behavior_state = "sheltering")) color: #magenta;
+                }
+            }
+
+            display "Ket_qua_so_tan" {
+                chart "Ket qua so tan theo chu ky" type: series {
+                    data "Da thoat" value: length(occupant where (each.behavior_state = "evacuated")) color: #green;
+                    data "Con trong toa" value: length(occupant where (each.behavior_state != "evacuated")) color: #blue;
+                    data "Mat kha nang di chuyen" value: length(occupant where (each.is_incapacitated)) color: #red;
+                }
+            }
     }
 }
+

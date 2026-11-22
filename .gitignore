@@ -1,0 +1,31 @@
+# GAMA / Eclipse workspace & logs
+.metadata/
+.gama_ws/
+*.log
+gama_err.log
+bin/
+
+# Large reference materials & research papers
+material/
+
+# AI Agent / Local prompt rules
+.agents/
+GEMINI.md
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
